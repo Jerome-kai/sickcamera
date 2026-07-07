@@ -45,7 +45,8 @@ class ST7796:
         rotate_180: bool | None = None,
     ) -> None:
         self.spi_bus = spi_bus if spi_bus is not None else _env_int("DISPLAY_SPI_BUS", 1)
-        self.spi_dev = spi_dev if spi_dev is not None else _env_int("DISPLAY_SPI_DEV", 0)
+        # Legacy 4.9 image exposes /dev/spidev1.1; modern images use spidev1.0 (DEV=0).
+        self.spi_dev = spi_dev if spi_dev is not None else _env_int("DISPLAY_SPI_DEV", 1)
         self.speed_hz = speed_hz if speed_hz is not None else _env_int("DISPLAY_SPI_HZ", 40_000_000)
         self.dc_pin = dc_pin if dc_pin is not None else _env_int("DISPLAY_DC_PIN", 74)  # PC10
         self.rst_pin = rst_pin if rst_pin is not None else _env_int("DISPLAY_RST_PIN", 71)  # PC7

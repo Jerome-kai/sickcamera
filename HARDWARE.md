@@ -109,9 +109,12 @@ The app supports it via automatic fallbacks, with three extra requirements:
    registers at startup. If you'd rather not run as root, fit external **10kΩ resistors
    from each button pin to 3.3V** and set `SUNXI_SET_PULLUPS=0`.
 
-SPI enablement on this image: `sudo orangepi-config` → System → Hardware → enable
-`spi-spidev`, or edit `/boot/orangepiEnv.txt` as described below. Confirm with
-`ls /dev/spidev*` after reboot.
+SPI enablement on this image: edit `/boot/orangepiEnv.txt` as described below (older
+orangepi-config builds have no Hardware/overlay menu). Confirm with `ls /dev/spidev*`
+after reboot. **On this legacy image the SPI1 device appears as `/dev/spidev1.1`**
+(chip-select 1 — a quirk of the 4.9 device tree; wiring is unchanged, CS stays on
+header pin 24). Set `DISPLAY_SPI_DEV=1` in `.env` (the default). Modern images expose
+`/dev/spidev1.0` instead → set `DISPLAY_SPI_DEV=0`.
 
 If sysfs GPIO numbering doesn't match (button test shows nothing), check
 `cat /sys/class/gpio/gpiochip*/base` — if the base isn't 0, set `GPIO_SYSFS_BASE`
@@ -129,7 +132,9 @@ removes all three caveats, if you ever feel like it.
    param_spidev_spi_bus=1
    ```
 
-   Reboot, then confirm `/dev/spidev1.0` exists.
+   Reboot, then confirm a bus-1 device exists: `ls /dev/spidev*` should show
+   `/dev/spidev1.1` (legacy 4.9 image → `DISPLAY_SPI_DEV=1`, the default) or
+   `/dev/spidev1.0` (modern images → `DISPLAY_SPI_DEV=0`).
 
 2. **NetworkManager** (for the on-camera Wi-Fi menu) — Ubuntu server ships with netplan +
    systemd-networkd:
@@ -174,7 +179,8 @@ removes all three caveats, if you ever feel like it.
 | Panel colors inverted / washed out | toggle `DISPLAY_INVERT` in `.env` |
 | Image mirrored or upside down | toggle `DISPLAY_ROTATION_180` |
 | Red and blue swapped in the camera preview | toggle `CAMERA_SWAP_RED_BLUE` |
-| `/dev/spidev1.0` missing | overlay not applied — recheck `orangepiEnv.txt`, reboot |
+| no `/dev/spidev1.*` device | overlay not applied — recheck `orangepiEnv.txt`, reboot |
+| display driver can't open SPI | match `DISPLAY_SPI_DEV` to `ls /dev/spidev*`: `spidev1.1` → 1 (legacy image), `spidev1.0` → 0 |
 | `Permission denied` on gpiochip/spidev | re-login after `install_service.sh` (group membership), or run once with `sudo` to confirm wiring |
 | Buttons never register | pull-up bias needs a modern kernel (5.15+ image); check `gpioinfo` shows the lines as unused; worst case add external 10kΩ pull-ups to 3.3V |
 | UI has black side bars | expected (4:3 UI on a 3:2 panel); `DISPLAY_FIT=stretch` to fill |
