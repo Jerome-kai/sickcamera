@@ -41,10 +41,28 @@ fi
 echo "ImageGenCam setup"
 echo
 echo "Step 1 of 2: creating the Python environment"
+# The app needs Python 3.10+ (Ubuntu 20.04 ships 3.8 — see deadsnakes note in HARDWARE.md).
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "${PYTHON_BIN}" ]]; then
+  for candidate in python3 python3.12 python3.11 python3.10; do
+    if command -v "${candidate}" >/dev/null 2>&1 && \
+       "${candidate}" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+      PYTHON_BIN="${candidate}"
+      break
+    fi
+  done
+fi
+if [[ -z "${PYTHON_BIN}" ]]; then
+  echo "Python 3.10+ not found. On Ubuntu 20.04 install it with:"
+  echo "  sudo add-apt-repository ppa:deadsnakes/ppa"
+  echo "  sudo apt install python3.10 python3.10-venv python3.10-dev"
+  exit 1
+fi
+echo "Using ${PYTHON_BIN}"
 # spidev and gpiod build small C extensions from sdist.
 sudo apt-get install -y python3-dev build-essential >/dev/null 2>&1 || true
 rm -rf .venv
-python3 -m venv .venv
+"${PYTHON_BIN}" -m venv .venv
 "${PROJECT_ROOT}/.venv/bin/pip" install --upgrade pip
 install_python_deps
 echo

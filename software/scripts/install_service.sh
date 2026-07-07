@@ -14,6 +14,9 @@ SUDOERS_PATH="/etc/sudoers.d/imagegencam-nmcli"
 UDEV_RULES_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/99-imagegencam-hw.rules"
 UDEV_RULES_PATH="/etc/udev/rules.d/99-imagegencam-hw.rules"
 WIFI_INTERFACE="${WIFI_INTERFACE:-wlan0}"
+# Override with SERVICE_USER=root on the legacy 4.9 kernel (sysfs GPIO + /dev/mem
+# pull-ups need root there); default is the invoking user.
+SERVICE_USER="${SERVICE_USER:-${USER}}"
 UNUSED_SERVICES=(
   bluetooth.service
   colord.service
@@ -79,7 +82,7 @@ done
 
 render_service() {
   sed \
-    -e "s|__SERVICE_USER__|${USER}|g" \
+    -e "s|__SERVICE_USER__|${SERVICE_USER}|g" \
     -e "s|__PROJECT_ROOT__|${PROJECT_ROOT}|g" \
     "${TEMPLATE_PATH}"
 }
@@ -92,7 +95,7 @@ render_boot_splash_service() {
 
 render_sudoers() {
   sed \
-    -e "s|__SERVICE_USER__|${USER}|g" \
+    -e "s|__SERVICE_USER__|${SERVICE_USER}|g" \
     -e "s|__WIFI_INTERFACE__|${WIFI_INTERFACE}|g" \
     "${SUDOERS_TEMPLATE_PATH}"
 }

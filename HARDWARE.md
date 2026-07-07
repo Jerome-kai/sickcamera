@@ -85,6 +85,41 @@ how many you parallel — parallel adds capacity, not voltage — so use a dual-
 bank PCB module (charging + protection + 5V/2A boost in one board) and feed its 5V output
 to the USB-C connector. One cell ≈ 2–3h runtime, two in parallel ≈ all-day.
 
+## Legacy 4.9 kernel image (official "Orange Pi Focal" Ubuntu 20.04)
+
+The stock orangepi.org Ubuntu 20.04 image runs **Linux 4.9.170-sun50iw9** and Python 3.8.
+The app supports it via automatic fallbacks, with three extra requirements:
+
+1. **Python 3.10+ from deadsnakes** (the setup scripts detect and use it):
+
+   ```bash
+   sudo add-apt-repository ppa:deadsnakes/ppa
+   sudo apt update
+   sudo apt install python3.10 python3.10-venv python3.10-dev
+   ```
+
+2. **GPIO runs over sysfs** (`GPIO_BACKEND=auto` handles this — the modern gpiod
+   interface needs kernel 5.10+). Nothing to configure.
+
+3. **Run as root.** sysfs GPIO and the /dev/mem pull-up configuration need root on 4.9:
+   - one-off runs: `sudo ./scripts/run.sh`, `sudo .venv/bin/python3 scripts/display_test.py`
+   - service install: `SERVICE_USER=root ./scripts/install_service.sh`
+
+   Internal pull-ups for the buttons are written directly to the H616 pin-controller
+   registers at startup. If you'd rather not run as root, fit external **10kΩ resistors
+   from each button pin to 3.3V** and set `SUNXI_SET_PULLUPS=0`.
+
+SPI enablement on this image: `sudo orangepi-config` → System → Hardware → enable
+`spi-spidev`, or edit `/boot/orangepiEnv.txt` as described below. Confirm with
+`ls /dev/spidev*` after reboot.
+
+If sysfs GPIO numbering doesn't match (button test shows nothing), check
+`cat /sys/class/gpio/gpiochip*/base` — if the base isn't 0, set `GPIO_SYSFS_BASE`
+in `.env` to that base value.
+
+A reflash to the current Orange Pi Zero2 Ubuntu 22.04 image (kernel 5.16+) or Armbian
+removes all three caveats, if you ever feel like it.
+
 ## One-time OS setup
 
 1. **Enable SPI1** — edit `/boot/orangepiEnv.txt` (Armbian: `/boot/armbianEnv.txt`) and add:

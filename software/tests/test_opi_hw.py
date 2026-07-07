@@ -29,6 +29,20 @@ class RGB565ConversionTests(unittest.TestCase):
         self.assertEqual(len(ST7796.to_rgb565_bytes(image)), WIDTH * HEIGHT * 2)
 
 
+class SunxiPullRegisterTests(unittest.TestCase):
+    def test_pull_register_math(self) -> None:
+        from imagegencam.sunxi_gpio import pull_register
+
+        # PC9 (line 73): bank C (2) at 0x48, PULL0 at +0x1C, pin 9 -> bits 18-19.
+        self.assertEqual(pull_register(73), (0x64, 18))
+        # PC15 (line 79): still PULL0, bits 30-31.
+        self.assertEqual(pull_register(79), (0x64, 30))
+        # PC16 (line 80) would roll into PULL1.
+        self.assertEqual(pull_register(80), (0x68, 0))
+        # PH7 (line 231): bank H (7) at 0xFC, PULL0 at 0x118, bits 14-15.
+        self.assertEqual(pull_register(231), (0x118, 14))
+
+
 class ImportSurfaceTests(unittest.TestCase):
     def test_opi_hw_importable_without_hardware_libraries(self) -> None:
         # gpiod/spidev/cv2 must only be required at device-open time so the

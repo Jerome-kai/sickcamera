@@ -16,6 +16,7 @@ import time
 
 from PIL import Image
 
+from . import sunxi_gpio
 from .st7796 import ST7796, WIDTH as PANEL_WIDTH, HEIGHT as PANEL_HEIGHT
 
 
@@ -33,29 +34,21 @@ class DisplayHATMini:
     BUTTON_SHUTTER = _env_int("BUTTON_SHUTTER_PIN", 73)  # PC9, header pin 7
 
     def __init__(self, buffer: Image.Image, backlight_pwm: bool = True) -> None:
-        import gpiod
-        from gpiod.line import Bias, Direction, Value
-
-        self._Value = Value
         self._buffer = buffer
         self._fit_mode = os.environ.get("DISPLAY_FIT", "pillarbox").strip().lower()
         self._canvas = Image.new("RGB", (PANEL_WIDTH, PANEL_HEIGHT))
         self._panel = ST7796()
         self._panel.open()
 
-        button_pins = (
+        button_pins = [
             self.BUTTON_A,
             self.BUTTON_B,
             self.BUTTON_X,
             self.BUTTON_Y,
             self.BUTTON_SHUTTER,
-        )
-        self._buttons = gpiod.request_lines(
-            os.environ.get("GPIO_CHIP", "/dev/gpiochip0"),
-            consumer="imagegencam-buttons",
-            config={
-                button_pins: gpiod.LineSettings(direction=Direction.INPUT, bias=Bias.PULL_UP)
-            },
+        ]
+        self._buttons = sunxi_gpio.request_inputs(
+            button_pins, consumer="imagegencam-buttons", pull_up=True
         )
 
     def display(self) -> None:
@@ -71,7 +64,7 @@ class DisplayHATMini:
 
     def read_button(self, pin: int) -> bool:
         # Switches pull the line to ground when pressed.
-        return self._buttons.get_value(pin) == self._Value.INACTIVE
+        return not self._buttons.is_high(pin)
 
     def on_button_pressed(self, callback) -> None:
         # Force the controller onto its existing polling fallback path.

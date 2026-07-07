@@ -12,6 +12,8 @@ import time
 
 import numpy as np
 
+from . import sunxi_gpio
+
 
 WIDTH = 480
 HEIGHT = 320
@@ -57,20 +59,11 @@ class ST7796:
         self._lines = None
 
     def open(self) -> None:
-        import gpiod
         import spidev
-        from gpiod.line import Direction, Value
 
-        self._gpiod = gpiod
-        self._Value = Value
-        self._lines = gpiod.request_lines(
-            self.gpio_chip,
+        self._lines = sunxi_gpio.request_outputs(
+            [self.dc_pin, self.rst_pin, self.backlight_pin],
             consumer="imagegencam-display",
-            config={
-                (self.dc_pin, self.rst_pin, self.backlight_pin): gpiod.LineSettings(
-                    direction=Direction.OUTPUT, output_value=Value.INACTIVE
-                )
-            },
         )
         self.spi = spidev.SpiDev()
         self.spi.open(self.spi_bus, self.spi_dev)
@@ -80,7 +73,7 @@ class ST7796:
         self._init_panel()
 
     def _set_line(self, pin: int, high: bool) -> None:
-        self._lines.set_value(pin, self._Value.ACTIVE if high else self._Value.INACTIVE)
+        self._lines.set(pin, high)
 
     def _reset(self) -> None:
         self._set_line(self.rst_pin, True)
