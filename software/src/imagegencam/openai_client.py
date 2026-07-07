@@ -20,14 +20,16 @@ class _OpenAIClientBase:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max(0, int(max_retries))
         self._client = None
-        self._client_api_key: str | None = None
+        self._client_config: tuple[str, str | None] | None = None
 
     def _require_client(self):
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
         if not api_key:
             raise OpenAIImageError("OPENAI_API_KEY is not set.")
+        base_url = os.environ.get("OPENAI_BASE_URL", "").strip() or None
 
-        if self._client is not None and self._client_api_key == api_key:
+        config = (api_key, base_url)
+        if self._client is not None and self._client_config == config:
             return self._client
 
         try:
@@ -39,10 +41,11 @@ class _OpenAIClientBase:
 
         self._client = OpenAI(
             api_key=api_key,
+            base_url=base_url,
             timeout=self.timeout_seconds,
             max_retries=self.max_retries,
         )
-        self._client_api_key = api_key
+        self._client_config = config
         return self._client
 
     @staticmethod
@@ -133,7 +136,8 @@ class OpenAIImageEditor(_OpenAIClientBase):
                 "output_format": self.output_format,
                 "timeout": self.timeout_seconds,
             }
-            if self.model not in {"gpt-image-2", "gpt-image-2-2026-04-21"}:
+            # Gateways (e.g. Vercel AI Gateway) prefix model names like "openai/gpt-image-2".
+            if self.model.split("/")[-1] not in {"gpt-image-2", "gpt-image-2-2026-04-21"}:
                 request_options["input_fidelity"] = "low"
             if self.output_format in {"jpeg", "webp"}:
                 request_options["output_compression"] = self.output_compression

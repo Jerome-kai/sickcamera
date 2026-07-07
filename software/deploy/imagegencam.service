@@ -1,7 +1,7 @@
 [Unit]
 Description=ImageGenCam
-After=pisugar-server.service imagegencam-boot-splash.service
-Wants=pisugar-server.service imagegencam-boot-splash.service
+After=imagegencam-boot-splash.service
+Wants=imagegencam-boot-splash.service
 StartLimitIntervalSec=30
 StartLimitBurst=10
 
@@ -14,6 +14,7 @@ EnvironmentFile=-__PROJECT_ROOT__/.env
 Environment=IMAGE_GEN_PORT=80
 Environment=IMAGE_GEN_SERVICE_PORT=80
 AmbientCapabilities=CAP_NET_BIND_SERVICE
+SupplementaryGroups=gpio spi video
 ExecStart=__PROJECT_ROOT__/scripts/run.sh
 Restart=on-failure
 RestartSec=3

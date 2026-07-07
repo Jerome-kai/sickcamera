@@ -47,15 +47,16 @@ def load_boot_image() -> Image.Image:
 
 
 def main() -> int:
-    import displayhatmini
+    sys.path.insert(0, str(PROJECT_ROOT / "src"))
+    if os.environ.get("IMAGEGENCAM_HW", "opi").strip().lower() == "pi":
+        import displayhatmini
+    else:
+        from imagegencam import opi_hw as displayhatmini
 
     image = load_boot_image()
     buffer = Image.new("RGB", (WIDTH, HEIGHT))
     buffer.paste(image)
     display = displayhatmini.DisplayHATMini(buffer, backlight_pwm=True)
-    rotation = int(os.environ.get("DISPLAY_ST7789_ROTATION", "0"))
-    if hasattr(display, "st7789") and hasattr(display.st7789, "_rotation"):
-        display.st7789._rotation = rotation
     display.set_backlight(1.0)
     display.set_led(0.0, 0.0, 0.0)
     display.display()

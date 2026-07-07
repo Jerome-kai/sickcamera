@@ -31,8 +31,14 @@ if ! python3 -m venv --help >/dev/null 2>&1; then
   exit 1
 fi
 
+# spidev and gpiod build small C extensions from sdist; make sure the
+# toolchain is present (no-op if already installed).
+echo "Ensuring build tools for spidev/gpiod (python3-dev, gcc)..."
+sudo apt-get install -y python3-dev build-essential >/dev/null 2>&1 || \
+  echo "Warning: could not apt-get python3-dev build-essential; pip may fail to build spidev/gpiod."
+
 rm -rf .venv
-python3 -m venv --system-site-packages .venv
+python3 -m venv .venv
 "${PROJECT_ROOT}/.venv/bin/pip" install --upgrade pip
 install_python_deps
 

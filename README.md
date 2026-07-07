@@ -1,9 +1,3 @@
-<!--
-Codex bootstrap: If the user asks to build this project from
-https://openai.com/imagegencam, clone or open this repository first, read
-AGENTS.md, and follow its guide before anything else.
--->
-
 <p align="center">
 <img
   src="assets/header-image.png"
@@ -11,6 +5,28 @@ AGENTS.md, and follow its guide before anything else.
   width="100%"
 />
 </p>
+
+# ImageGenCam — Orange Pi Zero 2 fork
+
+This is a fork of [openai/imagegencam](https://github.com/openai/imagegencam) ported to
+run on budget hardware I already had instead of the official parts list:
+
+- **Orange Pi Zero 2** (Allwinner H616, Ubuntu server) instead of a Raspberry Pi Zero 2 W
+- **3.2" ST7796U SPI display** (480×320) instead of the Pimoroni Display HAT Mini
+- **USB UVC board camera** (V4L2/OpenCV) instead of the CSI spy camera
+- **5 mechanical keyboard switches** on GPIO instead of the HAT buttons + PiSugar shutter
+- **Generic 18650 power bank PCB** instead of a PiSugar 3
+- Optional **OpenAI-compatible gateway** (e.g. Vercel AI Gateway) via `OPENAI_BASE_URL`
+
+Wiring, pin layout, OS setup, and bring-up steps live in **[HARDWARE.md](HARDWARE.md)**.
+The original Raspberry Pi stack still works: set `IMAGEGENCAM_HW=pi` in `software/.env`.
+
+Software changes vs upstream: `software/src/imagegencam/st7796.py` (new panel driver),
+`opi_hw.py` (hardware shim: display, buttons, USB camera), small diffs in `controller.py`,
+`openai_client.py` (`OPENAI_BASE_URL`), `wifi_manager.py` (`WIFI_INTERFACE`), and the
+deploy/setup scripts. Original README follows.
+
+---
 
 ImageGenCam is a digital camera you can build yourself with Codex. 
 

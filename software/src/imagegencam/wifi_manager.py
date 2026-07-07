@@ -17,6 +17,7 @@ from uuid import uuid4
 
 
 ROLLBACK_DIR = Path("/tmp/imagegencam-wifi")
+WIFI_IFNAME = os.environ.get("WIFI_INTERFACE", "wlan0").strip() or "wlan0"
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,7 @@ class NetworkManagerWifi:
         return networks
 
     def scan_networks(self) -> list[WifiNetwork]:
-        _run_privileged_nmcli(["dev", "wifi", "rescan", "ifname", "wlan0"], timeout=12.0)
+        _run_privileged_nmcli(["dev", "wifi", "rescan", "ifname", WIFI_IFNAME], timeout=12.0)
         result = _run_privileged_nmcli(
             [
                 "-t",
@@ -143,7 +144,7 @@ class NetworkManagerWifi:
                 "wifi",
                 "list",
                 "ifname",
-                "wlan0",
+                WIFI_IFNAME,
                 "--rescan",
                 "no",
             ],

@@ -1,4 +1,7 @@
 openai>=1.109.0
 qrcode>=8.2
 Pillow>=10.0.0
-displayhatmini>=0.0.2
+numpy>=1.26
+opencv-python-headless>=4.9
+spidev>=3.6
+gpiod>=2.2

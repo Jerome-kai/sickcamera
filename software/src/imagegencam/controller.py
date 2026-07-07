@@ -205,7 +205,10 @@ class ImageGenCamController:
         self.modal_background_image: Image.Image | None = None
         self.modal_background_frame_id = -1
 
-        self.preview_crop_box = self._build_crop_box(self.preview_size[1], self.preview_size[0])
+        if self.camera_rotation_degrees % 180 == 90:
+            self.preview_crop_box = self._build_crop_box(self.preview_size[1], self.preview_size[0])
+        else:
+            self.preview_crop_box = self._build_crop_box(self.preview_size[0], self.preview_size[1])
         self.preview_calibration_lut = self._build_preview_calibration_lut(self.state.preview_calibration)
 
         self.capture_feedback_frame: Image.Image | None = None
@@ -266,7 +269,11 @@ class ImageGenCamController:
         self.battery_readings: list[int] = []
         self.battery_sample_size = 25
         self.pisugar_battery_bus = None
-        self.pisugar_power_button_shutter_enabled = (
+        self.pisugar_enabled = (
+            os.environ.get("PISUGAR_ENABLED", "0").strip().lower()
+            not in {"0", "false", "no", "off"}
+        )
+        self.pisugar_power_button_shutter_enabled = self.pisugar_enabled and (
             os.environ.get("PISUGAR_POWER_BUTTON_SHUTTER", "1").strip().lower()
             not in {"0", "false", "no", "off"}
         )
@@ -327,6 +334,10 @@ class ImageGenCamController:
                 continue
 
     def _setup_pisugar_battery_bus(self) -> None:
+        if not self.pisugar_enabled:
+            self.pisugar_battery_bus = None
+            self.pisugar_power_button_available = False
+            return
         try:
             import smbus  # type: ignore
 
@@ -355,7 +366,10 @@ class ImageGenCamController:
         self.pisugar_power_button_available = True
 
     def _setup_display(self) -> None:
-        import displayhatmini
+        if os.environ.get("IMAGEGENCAM_HW", "opi").strip().lower() == "pi":
+            import displayhatmini
+        else:
+            from . import opi_hw as displayhatmini
 
         self.displayhatmini = displayhatmini
         self.buffer = Image.new("RGB", (WIDTH, HEIGHT))
@@ -366,7 +380,10 @@ class ImageGenCamController:
         self.display.set_led(0.0, 0.0, 0.0)
 
     def _setup_camera(self) -> None:
-        from picamera2 import Picamera2
+        if os.environ.get("IMAGEGENCAM_HW", "opi").strip().lower() == "pi":
+            from picamera2 import Picamera2
+        else:
+            from .opi_hw import Picamera2
 
         self.picam2 = Picamera2()
         self.preview_camera_config = self.picam2.create_preview_configuration(
@@ -410,6 +427,15 @@ class ImageGenCamController:
         self.button_last_states = {
             pin: self.display.read_button(pin) for pin in self.button_pins
         }
+        self.shutter_button_pin = getattr(
+            self.displayhatmini.DisplayHATMini, "BUTTON_SHUTTER", None
+        )
+        self.shutter_button_last_state = (
+            self.display.read_button(self.shutter_button_pin)
+            if self.shutter_button_pin is not None
+            else False
+        )
+        self.shutter_button_pressed_at: float | None = None
 
         def callback(pin) -> None:
             if not self.display.read_button(pin):
@@ -452,6 +478,33 @@ class ImageGenCamController:
             action = self.button_lookup.get(pin)
             if action:
                 self._queue_ui_event(action)
+
+    def _poll_shutter_button(self, now: float) -> None:
+        """GPIO shutter switch: short press captures, long press seeds magic mode."""
+        if self.shutter_button_pin is None:
+            return
+        pressed = self.display.read_button(self.shutter_button_pin)
+        was_pressed = self.shutter_button_last_state
+        self.shutter_button_last_state = pressed
+
+        if pressed and not was_pressed:
+            self.shutter_button_pressed_at = now
+            return
+
+        if not pressed and was_pressed:
+            pressed_at = self.shutter_button_pressed_at
+            self.shutter_button_pressed_at = None
+            if pressed_at is None:
+                return
+            if (now - pressed_at) <= PISUGAR_POWER_BUTTON_MAX_SHUTTER_PRESS_SECONDS:
+                self._queue_shutter_event("shutter")
+            return
+
+        if pressed and self.shutter_button_pressed_at is not None:
+            if (now - self.shutter_button_pressed_at) > PISUGAR_POWER_BUTTON_MAX_SHUTTER_PRESS_SECONDS:
+                self.shutter_button_pressed_at = None
+                if self.magic_mode_enabled:
+                    self._queue_shutter_event("magic_shutter")
 
     def _poll_external_shutter_events(self) -> None:
         if not SHUTTER_EVENT_DIR.exists():
@@ -1112,6 +1165,8 @@ class ImageGenCamController:
             self._show_text_screen("ImageGenCam v2.0", "Starting up...")
 
     def _pisugar_command(self, command: str) -> str | None:
+        if not self.pisugar_enabled:
+            return None
         try:
             with socket.create_connection(("127.0.0.1", 8423), timeout=0.5) as client:
                 client.sendall(f"{command}\n".encode("utf-8"))
@@ -1153,6 +1208,8 @@ class ImageGenCamController:
         return True
 
     def _maybe_configure_pisugar_button(self) -> None:
+        if not self.pisugar_enabled:
+            return
         if self.pisugar_shortcut_button_configured:
             return
         now = time.monotonic()
@@ -3195,6 +3252,7 @@ class ImageGenCamController:
                 self._maybe_configure_pisugar_button()
 
                 self._poll_buttons()
+                self._poll_shutter_button(now)
                 self._poll_external_shutter_events()
                 self._poll_pisugar_power_button(now)
 

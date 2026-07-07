@@ -41,14 +41,17 @@ fi
 echo "ImageGenCam setup"
 echo
 echo "Step 1 of 2: creating the Python environment"
+# spidev and gpiod build small C extensions from sdist.
+sudo apt-get install -y python3-dev build-essential >/dev/null 2>&1 || true
 rm -rf .venv
-python3 -m venv --system-site-packages .venv
+python3 -m venv .venv
 "${PROJECT_ROOT}/.venv/bin/pip" install --upgrade pip
 install_python_deps
 echo
 echo "Step 2 of 2: creating .env"
-echo "Create an OpenAI API key here:"
-echo "https://platform.openai.com/api-keys"
+echo "Use an OpenAI API key (https://platform.openai.com/api-keys) or, if you route"
+echo "through a gateway such as the Vercel AI Gateway, that gateway's API key."
+echo "For a gateway, also set OPENAI_BASE_URL in .env afterwards."
 echo
 echo "Paste the API key below. Input is hidden."
 printf "OPENAI_API_KEY: "

@@ -1,12 +1,13 @@
 [project]
 name = "imagegencam"
 version = "0.1.0"
-description = "ImageGenCam for Raspberry Pi Zero 2 W, Picamera2, Display HAT Mini, and OpenAI image edits."
-requires-python = ">=3.11"
+description = "ImageGenCam ported to Orange Pi Zero 2: ST7796 SPI display, USB camera, GPIO buttons, OpenAI-compatible image edits."
+requires-python = ">=3.10"
 dependencies = [
   "openai>=1.109.0",
   "qrcode>=8.2",
   "Pillow>=10.0.0",
+  "numpy>=1.26",
 ]
 
 [tool.pytest.ini_options]

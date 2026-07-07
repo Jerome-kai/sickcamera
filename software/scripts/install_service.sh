@@ -9,11 +9,11 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 BOOT_SPLASH_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-boot-splash.service"
 BOOT_SPLASH_SERVICE_NAME="imagegencam-boot-splash.service"
 BOOT_SPLASH_SERVICE_PATH="/etc/systemd/system/${BOOT_SPLASH_SERVICE_NAME}"
-GUI_FALLBACK_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-gui-fallback.service"
-GUI_FALLBACK_SERVICE_NAME="imagegencam-gui-fallback.service"
-GUI_FALLBACK_SERVICE_PATH="/etc/systemd/system/${GUI_FALLBACK_SERVICE_NAME}"
 SUDOERS_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-nmcli.sudoers"
 SUDOERS_PATH="/etc/sudoers.d/imagegencam-nmcli"
+UDEV_RULES_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/99-imagegencam-hw.rules"
+UDEV_RULES_PATH="/etc/udev/rules.d/99-imagegencam-hw.rules"
+WIFI_INTERFACE="${WIFI_INTERFACE:-wlan0}"
 UNUSED_SERVICES=(
   bluetooth.service
   colord.service
@@ -36,11 +36,6 @@ CLOUD_INIT_UNITS=(
 FAST_BOOT_DISABLED_TIMERS=(
   apt-daily.timer
   apt-daily-upgrade.timer
-)
-USER_DISABLED_UNITS=(
-  rpi-connect.service
-  rpi-connect-wayvnc.service
-  rpi-connect-signin.path
 )
 CLOUD_INIT_DISABLE_PATH="/etc/cloud/cloud-init.disabled"
 OUTPUT_PATH=""
@@ -89,12 +84,6 @@ render_service() {
     "${TEMPLATE_PATH}"
 }
 
-render_gui_fallback_service() {
-  sed \
-    -e "s|__PROJECT_ROOT__|${PROJECT_ROOT}|g" \
-    "${GUI_FALLBACK_TEMPLATE_PATH}"
-}
-
 render_boot_splash_service() {
   sed \
     -e "s|__PROJECT_ROOT__|${PROJECT_ROOT}|g" \
@@ -104,6 +93,7 @@ render_boot_splash_service() {
 render_sudoers() {
   sed \
     -e "s|__SERVICE_USER__|${USER}|g" \
+    -e "s|__WIFI_INTERFACE__|${WIFI_INTERFACE}|g" \
     "${SUDOERS_TEMPLATE_PATH}"
 }
 
@@ -121,24 +111,29 @@ fi
 
 TMP_FILE="$(mktemp)"
 BOOT_SPLASH_TMP_FILE="$(mktemp)"
-GUI_FALLBACK_TMP_FILE="$(mktemp)"
 SUDOERS_TMP_FILE="$(mktemp)"
-trap 'rm -f "${TMP_FILE}" "${BOOT_SPLASH_TMP_FILE}" "${GUI_FALLBACK_TMP_FILE}" "${SUDOERS_TMP_FILE}"' EXIT
+trap 'rm -f "${TMP_FILE}" "${BOOT_SPLASH_TMP_FILE}" "${SUDOERS_TMP_FILE}"' EXIT
 render_service > "${TMP_FILE}"
 render_boot_splash_service > "${BOOT_SPLASH_TMP_FILE}"
-render_gui_fallback_service > "${GUI_FALLBACK_TMP_FILE}"
 render_sudoers > "${SUDOERS_TMP_FILE}"
 
 sudo install -m 0644 "${TMP_FILE}" "${SERVICE_PATH}"
 sudo install -m 0644 "${BOOT_SPLASH_TMP_FILE}" "${BOOT_SPLASH_SERVICE_PATH}"
-sudo install -m 0644 "${GUI_FALLBACK_TMP_FILE}" "${GUI_FALLBACK_SERVICE_PATH}"
 sudo install -m 0440 "${SUDOERS_TMP_FILE}" "${SUDOERS_PATH}"
 sudo visudo -cf "${SUDOERS_PATH}"
 chmod +x "${PROJECT_ROOT}/scripts/show_boot_splash.py"
+
+# GPIO/SPI access for the service user without running as root.
+sudo groupadd -f gpio
+sudo groupadd -f spi
+sudo usermod -aG gpio,spi,video "${USER}"
+sudo install -m 0644 "${UDEV_RULES_TEMPLATE_PATH}" "${UDEV_RULES_PATH}"
+sudo udevadm control --reload
+sudo udevadm trigger --subsystem-match=spidev --subsystem-match=gpio || true
+
 sudo systemctl daemon-reload
 sudo systemctl set-default multi-user.target
 sudo systemctl enable "${BOOT_SPLASH_SERVICE_NAME}"
-sudo systemctl enable "${GUI_FALLBACK_SERVICE_NAME}"
 for SERVICE in "${UNUSED_SERVICES[@]}"; do
   timeout 12s sudo systemctl disable --now "${SERVICE}" >/dev/null 2>&1 || true
 done
@@ -153,21 +148,14 @@ sudo touch "${CLOUD_INIT_DISABLE_PATH}"
 for UNIT in "${CLOUD_INIT_UNITS[@]}"; do
   timeout 12s sudo systemctl disable "${UNIT}" >/dev/null 2>&1 || true
 done
-if systemctl --user list-unit-files >/dev/null 2>&1; then
-  for UNIT in "${USER_DISABLED_UNITS[@]}"; do
-    timeout 12s systemctl --user disable --now "${UNIT}" >/dev/null 2>&1 || true
-  done
-fi
 echo "Installed ${SERVICE_PATH}"
 echo "Installed ${BOOT_SPLASH_SERVICE_PATH}"
-echo "Installed ${GUI_FALLBACK_SERVICE_PATH}"
 echo "Installed ${SUDOERS_PATH} for rollback-safe Wi-Fi switching"
+echo "Installed ${UDEV_RULES_PATH} (gpio/spi group access; re-login for group changes)"
 echo "Boot mode: headless (multi-user.target)"
 echo "Early splash: enabled before network and camera startup"
-echo "Offline fallback: starts desktop if no network is detected after 5 minutes"
 echo "Disabled unused services: ${UNUSED_SERVICES[*]}"
 echo "Disabled for faster boot: ${FAST_BOOT_DISABLED_UNITS[*]} ${FAST_BOOT_DISABLED_TIMERS[*]} ${CLOUD_INIT_UNITS[*]}"
-echo "Disabled user services: ${USER_DISABLED_UNITS[*]}"
 echo "Enable on boot: sudo systemctl enable --now ${SERVICE_NAME}"
 echo "Status: sudo systemctl status ${SERVICE_NAME}"
 echo "Logs: sudo journalctl -u ${SERVICE_NAME} -f"
