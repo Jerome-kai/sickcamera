@@ -1,0 +1,16 @@
+[Unit]
+Description=Start Desktop If Camera Stays Offline
+After=network.target NetworkManager.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__PROJECT_ROOT__
+ExecStart=__PROJECT_ROOT__/scripts/network_fallback_gui.sh
+Restart=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

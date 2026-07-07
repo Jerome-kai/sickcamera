@@ -1,0 +1,1 @@
+__SERVICE_USER__ ALL=(root) NOPASSWD: /usr/bin/nmcli connection up id *, /usr/bin/nmcli device wifi connect *, /usr/bin/nmcli dev wifi rescan ifname wlan0, /usr/bin/nmcli -t -f active\,ssid\,signal\,security dev wifi list ifname wlan0 --rescan no

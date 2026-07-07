@@ -1,0 +1,18 @@
+[Unit]
+Description=ImageGenCam Early Boot Splash
+After=local-fs.target systemd-modules-load.service
+Before=network.target imagegencam.service
+Wants=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=__PROJECT_ROOT__
+ExecStart=/usr/bin/python3 __PROJECT_ROOT__/scripts/show_boot_splash.py
+RemainAfterExit=yes
+TimeoutStartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
