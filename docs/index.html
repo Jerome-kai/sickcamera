@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ImageGenCam — Enclosure &amp; Wiring Reference</title>
+<style>
+:root {
+  --paper: #f4f6f4;
+  --panel: #ffffff;
+  --ink: #1c2420;
+  --muted: #5a675f;
+  --accent: #1f7a54;
+  --accent-soft: #e2efe8;
+  --copper: #b0722f;
+  --line: #d8ded9;
+  --line-strong: #b9c3bc;
+  --w-5v: #d64545;
+  --w-33v: #e8890c;
+  --w-gnd: #3a3f3c;
+  --w-spi: #3b82c4;
+  --w-ctl: #8e5bb8;
+  --w-btn: #1f7a54;
+  --w-nc: #aab3ad;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #141815;
+    --panel: #1b211d;
+    --ink: #e7ece8;
+    --muted: #93a098;
+    --accent: #4cc08a;
+    --accent-soft: #1e2f26;
+    --copper: #d89b5a;
+    --line: #2a322c;
+    --line-strong: #3b463e;
+    --w-5v: #e06c6c;
+    --w-33v: #f0a13e;
+    --w-gnd: #c2c9c4;
+    --w-spi: #6aa5dd;
+    --w-ctl: #ab7fd1;
+    --w-btn: #4cc08a;
+    --w-nc: #5a675f;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #141815;
+  --panel: #1b211d;
+  --ink: #e7ece8;
+  --muted: #93a098;
+  --accent: #4cc08a;
+  --accent-soft: #1e2f26;
+  --copper: #d89b5a;
+  --line: #2a322c;
+  --line-strong: #3b463e;
+  --w-5v: #e06c6c;
+  --w-33v: #f0a13e;
+  --w-gnd: #c2c9c4;
+  --w-spi: #6aa5dd;
+  --w-ctl: #ab7fd1;
+  --w-btn: #4cc08a;
+  --w-nc: #5a675f;
+}
+:root[data-theme="light"] {
+  --paper: #f4f6f4;
+  --panel: #ffffff;
+  --ink: #1c2420;
+  --muted: #5a675f;
+  --accent: #1f7a54;
+  --accent-soft: #e2efe8;
+  --copper: #b0722f;
+  --line: #d8ded9;
+  --line-strong: #b9c3bc;
+  --w-5v: #d64545;
+  --w-33v: #e8890c;
+  --w-gnd: #3a3f3c;
+  --w-spi: #3b82c4;
+  --w-ctl: #8e5bb8;
+  --w-btn: #1f7a54;
+  --w-nc: #aab3ad;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+}
+.wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 24px 96px;
+}
+.prose { max-width: 760px; }
+header.masthead {
+  padding: 56px 0 32px;
+  border-bottom: 3px solid var(--ink);
+  margin-bottom: 8px;
+}
+.doc-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--copper);
+  display: flex;
+  gap: 1.5em;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+h1 {
+  font-family: var(--mono);
+  font-size: clamp(26px, 5vw, 42px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  margin: 0 0 12px;
+  text-wrap: balance;
+}
+.lede {
+  color: var(--muted);
+  font-size: 18px;
+  max-width: 62ch;
+  margin: 0;
+}
+nav.toc {
+  font-family: var(--mono);
+  font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 48px;
+}
+nav.toc a { color: var(--accent); text-decoration: none; }
+nav.toc a:hover, nav.toc a:focus-visible { text-decoration: underline; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+section { margin-bottom: 72px; }
+h2 {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 8px;
+  margin: 0 0 24px;
+}
+h2 .sec-no { color: var(--copper); margin-right: 0.8em; }
+h3 {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 36px 0 12px;
+}
+p { max-width: 68ch; margin: 0 0 16px; }
+ul, ol { max-width: 68ch; padding-left: 1.3em; margin: 0 0 16px; }
+li { margin-bottom: 6px; }
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--accent-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.tablewrap { overflow-x: auto; margin: 0 0 24px; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+th {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--muted);
+  border-bottom: 2px solid var(--ink);
+  padding: 8px 14px 8px 0;
+  white-space: nowrap;
+}
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 9px 14px 9px 0;
+  vertical-align: top;
+}
+td.mono, .mono { font-family: var(--mono); font-size: 13px; }
+td .dim { color: var(--muted); }
+.swatch {
+  display: inline-block;
+  width: 26px;
+  height: 11px;
+  border-radius: 2px;
+  border: 1px solid var(--line-strong);
+  vertical-align: baseline;
+  margin-right: 7px;
+}
+.figure {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px;
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+.figure svg { display: block; margin: 0 auto; min-width: 620px; max-width: 100%; height: auto; }
+.figure.narrow svg { min-width: 0; }
+figcaption, .caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin: 0 0 24px;
+}
+.callout {
+  border-left: 3px solid var(--copper);
+  background: var(--panel);
+  padding: 14px 18px;
+  margin: 0 0 24px;
+  max-width: 72ch;
+  font-size: 15px;
+}
+.callout strong { color: var(--copper); }
+.check {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 14px 18px;
+  margin: 0 0 24px;
+  max-width: 72ch;
+  font-size: 15px;
+}
+footer {
+  border-top: 3px solid var(--ink);
+  padding-top: 20px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+footer a { color: var(--accent); }
+svg text { font-family: var(--mono); }
+.pin-label { font-size: 11px; }
+.pin-num { font-size: 9px; fill: var(--muted); }
+.svg-title { font-size: 11px; letter-spacing: 0.1em; fill: var(--muted); }
+.svg-dim { font-size: 10px; fill: var(--muted); }
+.svg-part { font-size: 11px; fill: var(--ink); }
+@media (prefers-reduced-motion: no-preference) {
+  nav.toc a { transition: color 120ms ease; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="doc-id">
+    <span>IMAGEGENCAM · ORANGE PI ZERO 2 BUILD</span>
+    <span>REV A · 2026-07</span>
+    <span>SHEET 1 / 1</span>
+  </div>
+  <h1>Enclosure &amp; wiring reference</h1>
+  <p class="lede">Everything needed to design the outside of the camera: the parts and their real
+  dimensions, the complete wiring schematic, and the panel cutouts the case has to provide.
+  Software and API are already validated — this sheet is the physical half.</p>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#system">01 System</a>
+  <a href="#bom">02 Parts list</a>
+  <a href="#pinout">03 Header pinout</a>
+  <a href="#wiring">04 Wiring schematic</a>
+  <a href="#panels">05 Panel cutouts</a>
+  <a href="#layout">06 Internal layout</a>
+  <a href="#build">07 Build notes</a>
+</nav>
+
+<!-- ============================== 01 SYSTEM ============================== -->
+<section id="system">
+  <h2><span class="sec-no">01</span>System at a glance</h2>
+  <div class="figure">
+    <svg viewBox="0 0 900 300" role="img" aria-label="Block diagram: battery module feeds the Orange Pi over USB-C; the Pi drives the display over SPI, reads five buttons over GPIO, and reads the camera over USB.">
+      <!-- battery -->
+      <rect x="30" y="100" width="180" height="100" rx="4" fill="none" stroke="var(--copper)" stroke-width="2"/>
+      <text x="120" y="132" text-anchor="middle" class="svg-part" font-weight="bold">2× 18650 +</text>
+      <text x="120" y="150" text-anchor="middle" class="svg-part" font-weight="bold">power-bank PCB</text>
+      <text x="120" y="176" text-anchor="middle" class="svg-dim">charge + protect + 5 V boost</text>
+      <!-- pi -->
+      <rect x="330" y="70" width="220" height="160" rx="4" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="440" y="130" text-anchor="middle" class="svg-part" font-weight="bold">Orange Pi Zero 2</text>
+      <text x="440" y="150" text-anchor="middle" class="svg-dim">Allwinner H616 · 53 × 60 mm</text>
+      <text x="440" y="180" text-anchor="middle" class="svg-dim">runs the whole app</text>
+      <!-- display -->
+      <rect x="680" y="40" width="190" height="80" rx="4" fill="none" stroke="var(--ink)" stroke-width="2"/>
+      <text x="775" y="72" text-anchor="middle" class="svg-part" font-weight="bold">3.2″ ST7796U</text>
+      <text x="775" y="92" text-anchor="middle" class="svg-dim">480 × 320 · SPI</text>
+      <!-- buttons -->
+      <rect x="680" y="150" width="190" height="60" rx="4" fill="none" stroke="var(--ink)" stroke-width="2"/>
+      <text x="775" y="176" text-anchor="middle" class="svg-part" font-weight="bold">5× MX switches</text>
+      <text x="775" y="194" text-anchor="middle" class="svg-dim">GPIO, active-low</text>
+      <!-- camera -->
+      <rect x="680" y="240" width="190" height="50" rx="4" fill="none" stroke="var(--ink)" stroke-width="2"/>
+      <text x="775" y="262" text-anchor="middle" class="svg-part" font-weight="bold">USB UVC camera</text>
+      <text x="775" y="280" text-anchor="middle" class="svg-dim">3.6 mm lens board</text>
+      <!-- arrows -->
+      <line x1="210" y1="150" x2="330" y2="150" stroke="var(--w-5v)" stroke-width="2.5"/>
+      <polygon points="330,150 320,145 320,155" fill="var(--w-5v)"/>
+      <text x="270" y="140" text-anchor="middle" class="svg-dim">5 V / 2 A → USB-C</text>
+      <line x1="550" y1="105" x2="680" y2="80" stroke="var(--w-spi)" stroke-width="2.5"/>
+      <polygon points="680,80 668,79 671,89" fill="var(--w-spi)"/>
+      <text x="615" y="76" text-anchor="middle" class="svg-dim">SPI1 + 3 GPIO</text>
+      <line x1="680" y1="180" x2="550" y2="165" stroke="var(--w-btn)" stroke-width="2.5"/>
+      <polygon points="550,165 561,161 560,171" fill="var(--w-btn)"/>
+      <text x="615" y="160" text-anchor="middle" class="svg-dim">5 GPIO in</text>
+      <line x1="680" y1="265" x2="550" y2="215" stroke="var(--copper)" stroke-width="2.5"/>
+      <polygon points="550,215 561,214 557,223" fill="var(--copper)"/>
+      <text x="628" y="252" text-anchor="middle" class="svg-dim">USB-A</text>
+    </svg>
+  </div>
+  <p class="caption">FIG 1 — Four modules, three kinds of connection. Only the display and buttons need soldered/Dupont wiring; camera and power are plug-in.</p>
+</section>
+
+<!-- ============================== 02 BOM ============================== -->
+<section id="bom">
+  <h2><span class="sec-no">02</span>Parts list &amp; dimensions</h2>
+  <h3>A — Electronics (already owned)</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>#</th><th>Part</th><th>Footprint to plan around</th><th>Mounting</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">A1</td><td>Orange Pi Zero 2</td><td class="mono">53 × 60 mm, ~18 mm tall with headers</td><td>4× M2.5 holes in the corners</td></tr>
+        <tr><td class="mono">A2</td><td>3.2″ ST7796U SPI display module</td><td class="mono">≈ 92 × 61 mm PCB · active area 67.6 × 45.1 mm <span class="dim">(measure yours)</span></td><td>4× M3 holes in the PCB corners</td></tr>
+        <tr><td class="mono">A3</td><td>5× mechanical keyboard switches (MX)</td><td class="mono">15.6 × 15.6 mm body · 11.6 mm above plate + keycap</td><td>14 × 14 mm plate cutout, 1.2–1.5 mm plate</td></tr>
+        <tr><td class="mono">A4</td><td>USB UVC board camera, 3.6 mm lens</td><td class="mono">small square PCB, lens barrel ≈ Ø14 mm <span class="dim">(measure yours)</span></td><td>2 screw holes or a printed clamp</td></tr>
+        <tr><td class="mono">A5</td><td>Dual-18650 power bank PCB (5 V/2 A out)</td><td class="mono">PCB varies · each cell Ø18 × 65 mm</td><td>cell holder clips or printed cradle</td></tr>
+        <tr><td class="mono">A6</td><td>2× 18650 Li-Ion cells (parallel)</td><td class="mono">Ø18 × 65 mm each → bay ≈ 40 × 70 × 20 mm</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>B — Enclosure hardware (to buy — all cheap)</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>#</th><th>Part</th><th>Qty</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">B1</td><td>Female–female Dupont jumper wires, 20 cm</td><td class="mono">13+</td><td>display (8) + buttons (5 signal) to the header</td></tr>
+        <tr><td class="mono">B2</td><td>Hookup wire for the button GND daisy-chain</td><td class="mono">~30 cm</td><td>one ground wire linking all 5 switches</td></tr>
+        <tr><td class="mono">B3</td><td>M2.5 screws + standoffs (or heat-set inserts)</td><td class="mono">4 sets</td><td>mount the Orange Pi</td></tr>
+        <tr><td class="mono">B4</td><td>M3 screws + standoffs</td><td class="mono">4 sets</td><td>mount the display behind the front panel</td></tr>
+        <tr><td class="mono">B5</td><td>Short right-angle USB-C cable or pigtail</td><td class="mono">1</td><td>battery PCB 5 V out → Pi USB-C, folded inside the case</td></tr>
+        <tr><td class="mono">B6</td><td>Rocker or slide switch, panel-mount</td><td class="mono">1</td><td>master power cut between battery PCB and Pi <span class="dim">(optional but recommended)</span></td></tr>
+        <tr><td class="mono">B7</td><td>Keycaps (1 distinct + 4 matching)</td><td class="mono">5</td><td>shutter should feel different from the UI keys</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout"><strong>Measure before you cut.</strong> A2, A4 and A5 vary between sellers.
+  Verify the display's PCB outline and hole spacing, the camera's lens barrel diameter, and the
+  battery PCB's port positions with calipers (or a ruler and patience) before finalising the case.</div>
+</section>
+
+<!-- ============================== 03 PINOUT ============================== -->
+<section id="pinout">
+  <h2><span class="sec-no">03</span>26-pin header pinout</h2>
+  <p>Every connection lands on the Orange Pi's 26-pin header. Pin 1 is the corner pin marked on
+  the silkscreen (square pad on the underside). Colors below match the wiring tables in §04.</p>
+  <div class="figure">
+    <svg viewBox="0 0 940 560" role="img" aria-label="Orange Pi Zero 2 26-pin header with every used pin labelled: display signals on pins 16 to 26, buttons on pins 7, 11, 13, 15 and 18, power and ground pins marked.">
+      <text x="470" y="24" text-anchor="middle" class="svg-title">26-PIN HEADER — TOP VIEW, PIN 1 TOP-LEFT</text>
+      <!-- header body -->
+      <rect x="425" y="40" width="90" height="500" rx="4" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+      <!-- pins: odd col cx=450, even col cx=490; row r: cy = 60 + r*37 -->
+      <!-- row template generated below -->
+      <g stroke="var(--ink)" stroke-width="1">
+        <!-- odd pins -->
+        <circle cx="450" cy="60"  r="7" fill="var(--w-33v)"/>
+        <circle cx="450" cy="97"  r="7" fill="var(--w-nc)"/>
+        <circle cx="450" cy="134" r="7" fill="var(--w-nc)"/>
+        <circle cx="450" cy="171" r="7" fill="var(--w-btn)"/>
+        <circle cx="450" cy="208" r="7" fill="var(--w-gnd)"/>
+        <circle cx="450" cy="245" r="7" fill="var(--w-btn)"/>
+        <circle cx="450" cy="282" r="7" fill="var(--w-btn)"/>
+        <circle cx="450" cy="319" r="7" fill="var(--w-btn)"/>
+        <circle cx="450" cy="356" r="7" fill="var(--w-33v)"/>
+        <circle cx="450" cy="393" r="7" fill="var(--w-spi)"/>
+        <circle cx="450" cy="430" r="7" fill="var(--w-nc)"/>
+        <circle cx="450" cy="467" r="7" fill="var(--w-spi)"/>
+        <circle cx="450" cy="504" r="7" fill="var(--w-gnd)"/>
+        <!-- even pins -->
+        <circle cx="490" cy="60"  r="7" fill="var(--w-5v)"/>
+        <circle cx="490" cy="97"  r="7" fill="var(--w-5v)"/>
+        <circle cx="490" cy="134" r="7" fill="var(--w-gnd)"/>
+        <circle cx="490" cy="171" r="7" fill="var(--w-nc)"/>
+        <circle cx="490" cy="208" r="7" fill="var(--w-nc)"/>
+        <circle cx="490" cy="245" r="7" fill="var(--w-nc)"/>
+        <circle cx="490" cy="282" r="7" fill="var(--w-gnd)"/>
+        <circle cx="490" cy="319" r="7" fill="var(--w-ctl)"/>
+        <circle cx="490" cy="356" r="7" fill="var(--w-btn)"/>
+        <circle cx="490" cy="393" r="7" fill="var(--w-gnd)"/>
+        <circle cx="490" cy="430" r="7" fill="var(--w-ctl)"/>
+        <circle cx="490" cy="467" r="7" fill="var(--w-spi)"/>
+        <circle cx="490" cy="504" r="7" fill="var(--w-ctl)"/>
+      </g>
+      <!-- pin numbers inside body -->
+      <g class="pin-num" text-anchor="middle">
+        <text x="450" y="79">1</text><text x="490" y="79">2</text>
+        <text x="450" y="116">3</text><text x="490" y="116">4</text>
+        <text x="450" y="153">5</text><text x="490" y="153">6</text>
+        <text x="450" y="190">7</text><text x="490" y="190">8</text>
+        <text x="450" y="227">9</text><text x="490" y="227">10</text>
+        <text x="450" y="264">11</text><text x="490" y="264">12</text>
+        <text x="450" y="301">13</text><text x="490" y="301">14</text>
+        <text x="450" y="338">15</text><text x="490" y="338">16</text>
+        <text x="450" y="375">17</text><text x="490" y="375">18</text>
+        <text x="450" y="412">19</text><text x="490" y="412">20</text>
+        <text x="450" y="449">21</text><text x="490" y="449">22</text>
+        <text x="450" y="486">23</text><text x="490" y="486">24</text>
+        <text x="450" y="523">25</text><text x="490" y="523">26</text>
+      </g>
+      <!-- left labels (odd pins) -->
+      <g class="pin-label" text-anchor="end" fill="var(--ink)">
+        <text x="415" y="64">3.3 V — spare</text>
+        <text x="415" y="101">PH5 · unused</text>
+        <text x="415" y="138">PH4 · unused</text>
+        <text x="415" y="175" font-weight="bold">PC9 — SHUTTER button</text>
+        <text x="415" y="212">GND — button ground rail</text>
+        <text x="415" y="249" font-weight="bold">PC6 — DOWN button</text>
+        <text x="415" y="286" font-weight="bold">PC5 — UP button</text>
+        <text x="415" y="323" font-weight="bold">PC8 — ALBUM button</text>
+        <text x="415" y="360" font-weight="bold">3.3 V — display VCC</text>
+        <text x="415" y="397" font-weight="bold">PH7 — SPI1 MOSI → display SDI</text>
+        <text x="415" y="434">PH8 · SPI1 MISO — unused</text>
+        <text x="415" y="471" font-weight="bold">PH6 — SPI1 CLK → display SCK</text>
+        <text x="415" y="508">GND — spare</text>
+      </g>
+      <!-- right labels (even pins) -->
+      <g class="pin-label" text-anchor="start" fill="var(--ink)">
+        <text x="525" y="64">5 V</text>
+        <text x="525" y="101">5 V</text>
+        <text x="525" y="138">GND</text>
+        <text x="525" y="175">PH2 · unused</text>
+        <text x="525" y="212">PH3 · unused</text>
+        <text x="525" y="249">PC11 · unused</text>
+        <text x="525" y="286">GND</text>
+        <text x="525" y="323" font-weight="bold">PC15 — display BACKLIGHT</text>
+        <text x="525" y="360" font-weight="bold">PC14 — PROMPT button</text>
+        <text x="525" y="397" font-weight="bold">GND — display GND</text>
+        <text x="525" y="434" font-weight="bold">PC7 — display RESET</text>
+        <text x="525" y="471" font-weight="bold">PH9 — SPI1 CS0 → display CS</text>
+        <text x="525" y="508" font-weight="bold">PC10 — display DC / RS</text>
+      </g>
+      <!-- legend -->
+      <g class="pin-label">
+        <circle cx="40" cy="470" r="6" fill="var(--w-5v)" stroke="var(--ink)"/><text x="54" y="474" fill="var(--ink)">5 V</text>
+        <circle cx="40" cy="492" r="6" fill="var(--w-33v)" stroke="var(--ink)"/><text x="54" y="496" fill="var(--ink)">3.3 V</text>
+        <circle cx="40" cy="514" r="6" fill="var(--w-gnd)" stroke="var(--ink)"/><text x="54" y="518" fill="var(--ink)">GND</text>
+        <circle cx="130" cy="470" r="6" fill="var(--w-spi)" stroke="var(--ink)"/><text x="144" y="474" fill="var(--ink)">SPI bus</text>
+        <circle cx="130" cy="492" r="6" fill="var(--w-ctl)" stroke="var(--ink)"/><text x="144" y="496" fill="var(--ink)">display control</text>
+        <circle cx="130" cy="514" r="6" fill="var(--w-btn)" stroke="var(--ink)"/><text x="144" y="518" fill="var(--ink)">button input</text>
+        <circle cx="290" cy="470" r="6" fill="var(--w-nc)" stroke="var(--ink)"/><text x="304" y="474" fill="var(--ink)">unused</text>
+      </g>
+    </svg>
+  </div>
+  <p class="caption">FIG 2 — All 13 used pins. Pins marked "unused" stay free (UART5 on 8/10 is handy for a debug console later).</p>
+</section>
+
+<!-- ============================== 04 WIRING ============================== -->
+<section id="wiring">
+  <h2><span class="sec-no">04</span>Wiring schematic</h2>
+
+  <h3>Display — ST7796U over SPI1 (8 wires)</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Wire</th><th>Display pin</th><th>Header pin</th><th>Signal</th><th>gpiod line</th></tr></thead>
+      <tbody>
+        <tr><td><span class="swatch" style="background:var(--w-33v)"></span><span class="mono">orange</span></td><td class="mono">VCC</td><td class="mono">17</td><td>3.3 V</td><td class="mono">—</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-gnd)"></span><span class="mono">black</span></td><td class="mono">GND</td><td class="mono">20</td><td>ground</td><td class="mono">—</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-spi)"></span><span class="mono">blue</span></td><td class="mono">CS</td><td class="mono">24</td><td>PH9 / SPI1 CS0 (hardware)</td><td class="mono">—</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-ctl)"></span><span class="mono">purple</span></td><td class="mono">RESET</td><td class="mono">22</td><td>PC7</td><td class="mono">71</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-ctl)"></span><span class="mono">grey</span></td><td class="mono">DC / RS</td><td class="mono">26</td><td>PC10</td><td class="mono">74</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-spi)"></span><span class="mono">green</span></td><td class="mono">SDI / MOSI</td><td class="mono">19</td><td>PH7 / SPI1 MOSI</td><td class="mono">—</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-spi)"></span><span class="mono">yellow</span></td><td class="mono">SCK</td><td class="mono">23</td><td>PH6 / SPI1 CLK</td><td class="mono">—</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-ctl)"></span><span class="mono">white</span></td><td class="mono">LED</td><td class="mono">16</td><td>PC15 — backlight</td><td class="mono">79</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><span class="mono">SDO/MISO</span> and all touch pins (<span class="mono">T_CLK, T_CS, T_DIN,
+  T_DO, T_IRQ</span>) stay unconnected — the app doesn't use them. The Dupont colors are only a
+  suggestion; what matters is writing down what you used.</p>
+
+  <h3>Buttons — 5 switches, 6 wires total</h3>
+  <div class="figure">
+    <svg viewBox="0 0 880 330" role="img" aria-label="Five switches each connect one leg to its GPIO header pin; the other legs are daisy-chained together to a single ground wire into header pin 9.">
+      <text x="440" y="24" text-anchor="middle" class="svg-title">BUTTON WIRING — ONE GND WIRE SERVES ALL FIVE</text>
+      <!-- switches -->
+      <g>
+        <rect x="60"  y="60" width="80" height="80" rx="6" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+        <rect x="220" y="60" width="80" height="80" rx="6" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+        <rect x="380" y="60" width="80" height="80" rx="6" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+        <rect x="540" y="60" width="80" height="80" rx="6" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+        <rect x="700" y="60" width="80" height="80" rx="6" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+      </g>
+      <g class="svg-part" text-anchor="middle" font-weight="bold">
+        <text x="100" y="95">SHUTTER</text>
+        <text x="260" y="95">DOWN</text>
+        <text x="420" y="95">UP</text>
+        <text x="580" y="95">ALBUM</text>
+        <text x="740" y="95">PROMPT</text>
+      </g>
+      <g class="svg-dim" text-anchor="middle">
+        <text x="100" y="115">pin 7 · PC9</text>
+        <text x="260" y="115">pin 11 · PC6</text>
+        <text x="420" y="115">pin 13 · PC5</text>
+        <text x="580" y="115">pin 15 · PC8</text>
+        <text x="740" y="115">pin 18 · PC14</text>
+      </g>
+      <!-- signal legs -->
+      <g stroke="var(--w-btn)" stroke-width="2.5" fill="none">
+        <path d="M85 140 V 210"/>
+        <path d="M245 140 V 210"/>
+        <path d="M405 140 V 210"/>
+        <path d="M565 140 V 210"/>
+        <path d="M725 140 V 210"/>
+      </g>
+      <g class="svg-dim" text-anchor="middle" fill="var(--w-btn)">
+        <text x="85" y="228">→ pin 7</text>
+        <text x="245" y="228">→ pin 11</text>
+        <text x="405" y="228">→ pin 13</text>
+        <text x="565" y="228">→ pin 15</text>
+        <text x="725" y="228">→ pin 18</text>
+      </g>
+      <!-- gnd daisy chain -->
+      <g stroke="var(--w-gnd)" stroke-width="2.5" fill="none">
+        <path d="M115 140 V 270 H 755 V 140"/>
+        <path d="M275 140 V 270"/>
+        <path d="M435 140 V 270"/>
+        <path d="M595 140 V 270"/>
+        <path d="M435 270 V 300"/>
+      </g>
+      <text x="450" y="318" text-anchor="middle" class="svg-dim">single GND wire → header pin 9</text>
+    </svg>
+  </div>
+  <p class="caption">FIG 3 — Pressed = pin pulled to ground. Internal pull-ups are set by the software; no resistors needed.</p>
+  <p>Each switch is not polarised — either leg can be signal or ground. Solder the signal wire to
+  one leg and daisy-chain the other legs together with a single run of hookup wire ending at
+  header pin 9 (any GND pin works: 6, 9, 14, 20, 25).</p>
+
+  <h3>Power &amp; camera — plug-in, no soldering to the Pi</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Connection</th><th>From</th><th>To</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">POWER</td><td>Battery PCB 5 V output</td><td>Pi USB-C port</td><td>short right-angle cable (B5); put the master switch (B6) in this run — cut the 5 V line, not GND</td></tr>
+        <tr><td class="mono">CELLS</td><td>2× 18650 in parallel</td><td>Battery PCB B+/B−</td><td>parallel = more capacity at 3.7 V; the PCB boosts to 5 V</td></tr>
+        <tr><td class="mono">CHARGE</td><td>Case exterior</td><td>Battery PCB input port</td><td>expose the PCB's own charge port through the case wall</td></tr>
+        <tr><td class="mono">CAMERA</td><td>UVC camera board</td><td>Pi USB-A port</td><td>shows up as <code>/dev/video0</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout"><strong>Battery safety.</strong> Keep the 18650 bay away from the H616 SoC
+  (the warm corner of the Pi), make cell polarity impossible to get wrong (mark it in the plastic),
+  and never bypass the protection PCB. If a cell is dented or the wrapper is torn, replace it.</div>
+</section>
+
+<!-- ============================== 05 PANELS ============================== -->
+<section id="panels">
+  <h2><span class="sec-no">05</span>Panel cutouts</h2>
+  <p>These are the openings the enclosure must provide, whatever shape you give it.
+  Dimensions marked ✱ depend on your exact module — verify with calipers first (§02).</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Face</th><th>Cutout</th><th>Size</th><th>For</th></tr></thead>
+      <tbody>
+        <tr><td>Back (user side)</td><td>Display window</td><td class="mono">69 × 47 mm ✱</td><td>active area 67.6 × 45.1 mm + 0.7 mm clearance per side</td></tr>
+        <tr><td>Back</td><td>4× button holes</td><td class="mono">14 × 14 mm each</td><td>UP / DOWN / ALBUM / PROMPT switches snap into 1.2–1.5 mm wall</td></tr>
+        <tr><td>Top</td><td>1× button hole</td><td class="mono">14 × 14 mm</td><td>SHUTTER — index finger position, like a real camera</td></tr>
+        <tr><td>Front (subject side)</td><td>Lens hole</td><td class="mono">Ø 15 mm ✱</td><td>camera lens barrel; chamfer the edge so it doesn't vignette</td></tr>
+        <tr><td>Side</td><td>Charge port slot</td><td class="mono">≈ 10 × 4 mm ✱</td><td>battery PCB's charging connector</td></tr>
+        <tr><td>Side</td><td>Power switch hole</td><td class="mono">per switch (B6)</td><td>master on/off</td></tr>
+        <tr><td>Side or bottom</td><td>Vent slots</td><td class="mono">3–4 slots, 2 × 15 mm</td><td>H616 runs warm; passive airflow is enough</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="figure">
+    <svg viewBox="0 0 920 440" role="img" aria-label="Back panel drawing: display window on the left, a vertical column of four 14 by 14 millimetre button holes on the right, shutter hole shown on the top edge.">
+      <text x="460" y="26" text-anchor="middle" class="svg-title">BACK PANEL (USER SIDE) — SUGGESTED ARRANGEMENT · ≈ 130 × 78 MM SHOWN AT 5:1</text>
+      <!-- panel outline: 130x78mm at scale ~5.5 px/mm => 715x429; use 690x380 area -->
+      <rect x="115" y="50" width="690" height="360" rx="16" fill="var(--panel)" stroke="var(--ink)" stroke-width="2.5"/>
+      <!-- shutter on top edge -->
+      <rect x="620" y="36" width="74" height="28" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="657" y="30" text-anchor="middle" class="svg-dim">SHUTTER · top edge · 14 × 14</text>
+      <!-- display window: 69x47mm -> at 5.3 px/mm = 366x249 -->
+      <rect x="165" y="105" width="366" height="249" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="7 5"/>
+      <rect x="150" y="90" width="396" height="279" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
+      <text x="348" y="230" text-anchor="middle" class="svg-part" font-weight="bold">DISPLAY WINDOW</text>
+      <text x="348" y="250" text-anchor="middle" class="svg-dim">69 × 47 mm cutout</text>
+      <text x="348" y="268" text-anchor="middle" class="svg-dim">module PCB behind (grey outline)</text>
+      <!-- 4 buttons column: 14x14mm -> 74px, spaced -->
+      <g>
+        <rect x="655" y="90"  width="74" height="74" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+        <rect x="655" y="180" width="74" height="74" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+        <rect x="655" y="270" width="74" height="74" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+        <!-- 4th below -->
+      </g>
+      <g class="svg-part" text-anchor="middle" font-weight="bold">
+        <text x="692" y="131">UP</text>
+        <text x="692" y="221">DOWN</text>
+        <text x="692" y="311">ALBUM</text>
+      </g>
+      <rect x="745" y="180" width="0" height="0" fill="none"/>
+      <g>
+        <rect x="655" y="360" width="74" height="40" rx="5" fill="none" stroke="var(--copper)" stroke-width="2" stroke-dasharray="5 4"/>
+        <text x="692" y="385" text-anchor="middle" class="svg-dim" fill="var(--copper)">PROMPT ↓</text>
+      </g>
+      <!-- dimension marks -->
+      <line x1="165" y1="392" x2="531" y2="392" stroke="var(--muted)" stroke-width="1"/>
+      <text x="348" y="406" text-anchor="middle" class="svg-dim">69 mm</text>
+      <line x1="140" y1="105" x2="140" y2="354" stroke="var(--muted)" stroke-width="1"/>
+      <text x="132" y="234" text-anchor="end" class="svg-dim">47 mm</text>
+      <text x="775" y="140" class="svg-dim" transform="rotate(90 775 140)">14 × 14 mm · ≥ 5 mm apart</text>
+    </svg>
+  </div>
+  <p class="caption">FIG 4 — Back panel. Camera-style: screen left under the thumbless zone, UI column under the right thumb, shutter on the top edge under the index finger. PROMPT sits below ALBUM (or wherever the column fits your case height).</p>
+
+  <div class="check"><strong>Keycap clearance:</strong> MX switches need ≈ 11.6 mm of free depth
+  behind the plate plus the keycap in front. Leave at least 8 mm between the button column and
+  the display module's PCB edge inside the case.</div>
+</section>
+
+<!-- ============================== 06 LAYOUT ============================== -->
+<section id="layout">
+  <h2><span class="sec-no">06</span>Internal layout</h2>
+  <div class="figure">
+    <svg viewBox="0 0 920 380" role="img" aria-label="Top-down internal layout: display module against the back wall, Orange Pi standing behind it in the middle, battery bay along the front wall next to the camera board.">
+      <text x="460" y="26" text-anchor="middle" class="svg-title">TOP-DOWN SECTION — FRONT OF CAMERA AT BOTTOM</text>
+      <rect x="60" y="50" width="800" height="290" rx="14" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
+      <!-- display against back (top) wall -->
+      <rect x="120" y="62" width="500" height="46" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="370" y="91" text-anchor="middle" class="svg-part" font-weight="bold">ST7796U module — flat against back wall (M3 standoffs)</text>
+      <!-- buttons zone -->
+      <rect x="660" y="62" width="160" height="46" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="740" y="91" text-anchor="middle" class="svg-dim">button column</text>
+      <!-- pi -->
+      <rect x="250" y="150" width="330" height="90" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+      <text x="415" y="188" text-anchor="middle" class="svg-part" font-weight="bold">Orange Pi Zero 2 (M2.5 standoffs)</text>
+      <text x="415" y="210" text-anchor="middle" class="svg-dim">USB-A + USB-C edges facing the battery bay</text>
+      <!-- battery -->
+      <rect x="120" y="270" width="380" height="56" fill="none" stroke="var(--copper)" stroke-width="2"/>
+      <text x="310" y="296" text-anchor="middle" class="svg-part" font-weight="bold" fill="var(--copper)">18650 × 2 + power PCB</text>
+      <text x="310" y="315" text-anchor="middle" class="svg-dim">charge port through side wall</text>
+      <!-- camera -->
+      <rect x="640" y="270" width="120" height="56" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
+      <text x="700" y="296" text-anchor="middle" class="svg-part" font-weight="bold">camera</text>
+      <text x="700" y="315" text-anchor="middle" class="svg-dim">lens thru front</text>
+      <!-- annotations -->
+      <text x="415" y="133" text-anchor="middle" class="svg-dim">13 Dupont wires, folded ribbon</text>
+      <line x1="580" y1="195" x2="640" y2="290" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <text x="632" y="248" text-anchor="middle" class="svg-dim">USB-A</text>
+      <line x1="250" y1="195" x2="180" y2="280" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
+      <text x="196" y="240" text-anchor="middle" class="svg-dim">USB-C 5 V</text>
+      <!-- vents -->
+      <g stroke="var(--muted)" stroke-width="3">
+        <line x1="862" y1="150" x2="862" y2="170"/><line x1="862" y1="185" x2="862" y2="205"/><line x1="862" y1="220" x2="862" y2="240"/>
+      </g>
+      <text x="878" y="200" class="svg-dim" transform="rotate(90 878 200)">vents near SoC</text>
+    </svg>
+  </div>
+  <p class="caption">FIG 5 — Three thermal/weight zones: hot Pi in the middle with vents beside it, heavy cells low at the front for grip balance, display sandwiched to the back wall.</p>
+  <ul>
+    <li><strong>Depth budget:</strong> display module (~9 mm) + Pi with headers (~18 mm) + Dupont bend radius ≈ a case around <span class="mono">40–45 mm</span> deep. Cells lie flat in the same depth.</li>
+    <li><strong>Wire dressing:</strong> the 13 header wires leave the Pi as one ribbon; fold once and tape to the case floor so they can't touch the SoC.</li>
+    <li><strong>Serviceability:</strong> make one wall (front or bottom) screw-off. First hardware bring-up <em>will</em> involve reseating wires.</li>
+    <li><strong>Material:</strong> 3D print in PETG (more heat-tolerant than PLA next to the SoC), or laser-cut a 6-panel box; the 1.2–1.5 mm switch plate can be a separate inset piece in a thicker wall.</li>
+    <li><strong>Wi-Fi:</strong> the Pi's antenna is on the PCB — a plastic case is fine, but don't wrap the inside in foil tape near it.</li>
+  </ul>
+</section>
+
+<!-- ============================== 07 BUILD ============================== -->
+<section id="build">
+  <h2><span class="sec-no">07</span>Build order &amp; first power-up</h2>
+  <ol>
+    <li>Measure A2 / A4 / A5 with calipers; correct the ✱ dimensions in §05.</li>
+    <li>Cut or print the case; test-fit every module <em>before</em> wiring.</li>
+    <li>Snap in the 5 switches, solder signal legs + GND daisy-chain (FIG 3).</li>
+    <li>Connect the 8 display wires (§04 table) with the Pi powered off.</li>
+    <li>Bench test outside the closed case:
+      <span class="mono">sudo .venv/bin/python3 scripts/display_test.py</span> → color bars;
+      fix orientation/colors in <span class="mono">.env</span>
+      (<span class="mono">DISPLAY_INVERT</span>, <span class="mono">DISPLAY_ROTATION_180</span>).</li>
+    <li>Plug in the camera, run <span class="mono">sudo ./scripts/run.sh</span>, check preview + all 5 buttons.</li>
+    <li>Install the service (<span class="mono">SERVICE_USER=root ./scripts/install_service.sh</span>), move to battery power, close the case.</li>
+  </ol>
+  <div class="check"><strong>Already done:</strong> OS prepared (SPI1 → <span class="mono">/dev/spidev1.1</span>),
+  Python 3.10 venv, all dependencies, and the full API chain through the Vercel AI Gateway
+  (image edit + Magic mode both passing). The moment the hardware works, the camera works.</div>
+</section>
+
+<footer>
+  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV A</span>
+  <span>full software docs: <span class="mono">HARDWARE.md</span> in the repo</span>
+</footer>
+
+</div>
+
+</body>
+</html>
