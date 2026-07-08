@@ -65,6 +65,7 @@ class OpenAIImageEditor(_OpenAIClientBase):
         output_compression: int = 85,
         timeout_seconds: float = 90.0,
         max_retries: int = 1,
+        api_mode: str | None = None,
     ) -> None:
         super().__init__(timeout_seconds=timeout_seconds, max_retries=max_retries)
         self.model = model
@@ -72,6 +73,11 @@ class OpenAIImageEditor(_OpenAIClientBase):
         self.size = size
         self.output_format = output_format if output_format in {"png", "jpeg", "webp"} else "jpeg"
         self.output_compression = max(0, min(100, int(output_compression)))
+        # "edits" = /v1/images/edits (api.openai.com); "chat" = image editing via
+        # /v1/chat/completions with a multimodal image model — the path gateways like
+        # the Vercel AI Gateway support (they do not expose /v1/images/edits).
+        mode = (api_mode or os.environ.get("IMAGE_GEN_API", "edits")).strip().lower()
+        self.api_mode = mode if mode in {"edits", "chat"} else "edits"
 
     @property
     def output_extension(self) -> str:
@@ -116,7 +122,8 @@ class OpenAIImageEditor(_OpenAIClientBase):
                 f"User prompt: {prompt}"
             )
         logger.info(
-            "Starting image edit model=%s size=%s quality=%s format=%s source=%s refs=%s",
+            "Starting image edit api=%s model=%s size=%s quality=%s format=%s source=%s refs=%s",
+            self.api_mode,
             self.model,
             requested_size,
             self.quality,
@@ -124,6 +131,11 @@ class OpenAIImageEditor(_OpenAIClientBase):
             source_path,
             len(reference_paths),
         )
+
+        if self.api_mode == "chat":
+            return self._edit_image_via_chat(
+                client, source_path, reference_paths, full_prompt, output_path
+            )
 
         with source_path.open("rb") as source_file:
             reference_files = [path.open("rb") for path in reference_paths]
@@ -154,6 +166,94 @@ class OpenAIImageEditor(_OpenAIClientBase):
         output_path.write_bytes(self._extract_image_bytes(result))
         logger.info("Saved generated image to %s", output_path)
         return output_path
+
+    def _edit_image_via_chat(
+        self,
+        client,
+        source_path: Path,
+        reference_paths: list[Path],
+        full_prompt: str,
+        output_path: Path,
+    ) -> Path:
+        # quality/size are chosen by the model on this path; only the prompt and the
+        # attached images travel with the request.
+        content: list[dict] = [{"type": "text", "text": full_prompt}]
+        for path in [source_path, *reference_paths]:
+            content.append(
+                {"type": "image_url", "image_url": {"url": self._build_image_data_url(path)}}
+            )
+        response = client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": content}],
+            timeout=self.timeout_seconds,
+        )
+        image_bytes = self._extract_chat_image_bytes(response)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(self._reencode(image_bytes))
+        logger.info("Saved generated image to %s", output_path)
+        return output_path
+
+    @staticmethod
+    def _decode_data_url(url: str) -> bytes | None:
+        if not isinstance(url, str) or "base64," not in url:
+            return None
+        try:
+            return base64.b64decode(url.split("base64,", 1)[1])
+        except ValueError:
+            return None
+
+    @classmethod
+    def _extract_chat_image_bytes(cls, response) -> bytes:
+        def get(item, key):
+            if isinstance(item, dict):
+                return item.get(key)
+            return getattr(item, key, None)
+
+        for choice in getattr(response, "choices", None) or []:
+            message = get(choice, "message")
+            if message is None:
+                continue
+            # Gateways return generated images in message.images as image_url parts;
+            # some providers put them in message.content parts instead.
+            parts = list(get(message, "images") or [])
+            content = get(message, "content")
+            if isinstance(content, list):
+                parts.extend(content)
+            for part in parts:
+                image_url = get(part, "image_url")
+                url = get(image_url, "url") if image_url is not None else None
+                decoded = cls._decode_data_url(url)
+                if decoded:
+                    return decoded
+        raise OpenAIImageError(
+            "The model returned no image. Make sure IMAGE_GEN_MODEL is an "
+            "image-generation-capable model (e.g. google/gemini-2.5-flash-image on the "
+            "Vercel AI Gateway) when IMAGE_GEN_API=chat."
+        )
+
+    def _reencode(self, image_bytes: bytes) -> bytes:
+        """Convert whatever the model returned (usually PNG) to the configured format."""
+        import io
+
+        try:
+            from PIL import Image
+        except ImportError:
+            return image_bytes
+        try:
+            with Image.open(io.BytesIO(image_bytes)) as image:
+                buffer = io.BytesIO()
+                if self.output_format == "png":
+                    image.save(buffer, format="PNG")
+                else:
+                    image.convert("RGB").save(
+                        buffer,
+                        format="WEBP" if self.output_format == "webp" else "JPEG",
+                        quality=self.output_compression,
+                    )
+                return buffer.getvalue()
+        except Exception:
+            logger.warning("Could not re-encode generated image; saving as returned.")
+            return image_bytes
 
 
 class OpenAIMagicPromptPlanner(_OpenAIClientBase):

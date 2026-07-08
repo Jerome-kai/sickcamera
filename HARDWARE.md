@@ -166,9 +166,12 @@ removes all three caveats, if you ever feel like it.
 3. **Camera**: `ls /dev/video*`; the app's preview is the real test.
 4. **Full app from SSH**: `./scripts/run.sh` — live preview on the panel, buttons, shutter.
 5. **Generation**: with `OPENAI_API_KEY` (+ `OPENAI_BASE_URL` for a gateway) set, take a
-   photo and watch the queue. Gateway note: the app calls `/v1/images/edits` (multipart)
-   and `/v1/responses` — your gateway must proxy both; model names may need a provider
-   prefix (e.g. `IMAGE_GEN_MODEL=openai/gpt-image-2`).
+   photo and watch the queue. Verify the API path before the hardware arrives with
+   `.venv/bin/python3 scripts/gateway_test.py`. Gateway note: most gateways (including
+   the Vercel AI Gateway) do **not** expose `/v1/images/edits`; use the chat-completions
+   editing path instead — in `.env` set `IMAGE_GEN_API=chat` and an image-capable model
+   with provider prefix, e.g. `IMAGE_GEN_MODEL=google/gemini-2.5-flash-image`. Magic
+   mode uses `/v1/responses` (`MAGIC_MODE_MODEL` also needs a provider prefix).
 6. **Services**: `./scripts/install_service.sh`, then
    `sudo systemctl enable --now imagegencam.service`, reboot test.
 

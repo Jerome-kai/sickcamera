@@ -60,7 +60,9 @@ def main() -> int:
     failures = 0
 
     model = os.environ.get("IMAGE_GEN_MODEL", "gpt-image-2")
-    print(f"\n[1/2] images.edit via model {model} (may take ~30-90s)...")
+    api_mode = os.environ.get("IMAGE_GEN_API", "edits").strip().lower()
+    endpoint_name = "chat.completions" if api_mode == "chat" else "images.edit"
+    print(f"\n[1/2] {endpoint_name} (IMAGE_GEN_API={api_mode}) via model {model} (may take ~30-90s)...")
     try:
         editor = OpenAIImageEditor(
             model=model,
@@ -77,7 +79,7 @@ def main() -> int:
         print(f"PASS: image generated -> {result} ({result.stat().st_size} bytes)")
     except Exception:
         failures += 1
-        print("FAIL: images.edit did not work. Full error:")
+        print(f"FAIL: {endpoint_name} did not work. Full error:")
         traceback.print_exc()
 
     if os.environ.get("MAGIC_MODE_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
@@ -97,8 +99,10 @@ def main() -> int:
     print()
     if failures:
         print(f"{failures} test(s) failed. If you use a gateway, check that it proxies")
-        print("the failing endpoint and that model names carry the provider prefix")
-        print("(e.g. IMAGE_GEN_MODEL=openai/gpt-image-2, MAGIC_MODE_MODEL=openai/gpt-4.1-mini).")
+        print("the failing endpoint and that model names carry the provider prefix.")
+        print("Gateways without /v1/images/edits (e.g. Vercel AI Gateway) need:")
+        print("  IMAGE_GEN_API=chat")
+        print("  IMAGE_GEN_MODEL=google/gemini-2.5-flash-image  (or another image-capable model)")
         return 1
     print("All good — the API path is fully working. The camera will work once wired up.")
     return 0
