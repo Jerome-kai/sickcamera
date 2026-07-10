@@ -268,7 +268,7 @@ svg text { font-family: var(--mono); }
 <header class="masthead">
   <div class="doc-id">
     <span>IMAGEGENCAM · ORANGE PI ZERO 2 BUILD</span>
-    <span>REV A · 2026-07</span>
+    <span>REV B · 2026-07</span>
     <span>SHEET 1 / 1</span>
   </div>
   <h1>Enclosure &amp; wiring reference</h1>
@@ -362,6 +362,9 @@ svg text { font-family: var(--mono); }
         <tr><td class="mono">B5</td><td>Short right-angle USB-C cable or pigtail</td><td class="mono">1</td><td>battery PCB 5 V out → Pi USB-C, folded inside the case</td></tr>
         <tr><td class="mono">B6</td><td>Rocker or slide switch, panel-mount</td><td class="mono">1</td><td>master power cut between battery PCB and Pi <span class="dim">(optional but recommended)</span></td></tr>
         <tr><td class="mono">B7</td><td>Keycaps (1 distinct + 4 matching)</td><td class="mono">5</td><td>shutter should feel different from the UI keys</td></tr>
+        <tr><td class="mono">B8</td><td>Hot shoe socket (flash shoe with center contact)</td><td class="mono">1</td><td>flash trigger on the top face — see §04</td></tr>
+        <tr><td class="mono">B9</td><td>MOC3021 opto-triac, DIP-6 <span class="dim">(MOC3023 if trigger is unreliable)</span></td><td class="mono">1</td><td>isolates the Pi from the flash sync voltage</td></tr>
+        <tr><td class="mono">B10</td><td>330 Ω resistor, ¼ W</td><td class="mono">1</td><td>MOC3021 LED current limit</td></tr>
       </tbody>
     </table>
   </div>
@@ -403,7 +406,7 @@ svg text { font-family: var(--mono); }
         <circle cx="490" cy="134" r="7" fill="var(--w-gnd)"/>
         <circle cx="490" cy="171" r="7" fill="var(--w-nc)"/>
         <circle cx="490" cy="208" r="7" fill="var(--w-nc)"/>
-        <circle cx="490" cy="245" r="7" fill="var(--w-nc)"/>
+        <circle cx="490" cy="245" r="7" fill="var(--copper)"/>
         <circle cx="490" cy="282" r="7" fill="var(--w-gnd)"/>
         <circle cx="490" cy="319" r="7" fill="var(--w-ctl)"/>
         <circle cx="490" cy="356" r="7" fill="var(--w-btn)"/>
@@ -451,8 +454,8 @@ svg text { font-family: var(--mono); }
         <text x="525" y="138">GND</text>
         <text x="525" y="175">PH2 · unused</text>
         <text x="525" y="212">PH3 · unused</text>
-        <text x="525" y="249">PC11 · unused</text>
-        <text x="525" y="286">GND</text>
+        <text x="525" y="249" font-weight="bold">PC11 — FLASH trigger (hot shoe)</text>
+        <text x="525" y="286">GND — hot shoe opto</text>
         <text x="525" y="323" font-weight="bold">PC15 — display BACKLIGHT</text>
         <text x="525" y="360" font-weight="bold">PC14 — PROMPT button</text>
         <text x="525" y="397" font-weight="bold">GND — display GND</text>
@@ -468,11 +471,12 @@ svg text { font-family: var(--mono); }
         <circle cx="130" cy="470" r="6" fill="var(--w-spi)" stroke="var(--ink)"/><text x="144" y="474" fill="var(--ink)">SPI bus</text>
         <circle cx="130" cy="492" r="6" fill="var(--w-ctl)" stroke="var(--ink)"/><text x="144" y="496" fill="var(--ink)">display control</text>
         <circle cx="130" cy="514" r="6" fill="var(--w-btn)" stroke="var(--ink)"/><text x="144" y="518" fill="var(--ink)">button input</text>
-        <circle cx="290" cy="470" r="6" fill="var(--w-nc)" stroke="var(--ink)"/><text x="304" y="474" fill="var(--ink)">unused</text>
+        <circle cx="290" cy="470" r="6" fill="var(--copper)" stroke="var(--ink)"/><text x="304" y="474" fill="var(--ink)">flash trigger</text>
+        <circle cx="290" cy="492" r="6" fill="var(--w-nc)" stroke="var(--ink)"/><text x="304" y="496" fill="var(--ink)">unused</text>
       </g>
     </svg>
   </div>
-  <p class="caption">FIG 2 — All 13 used pins. Pins marked "unused" stay free (UART5 on 8/10 is handy for a debug console later).</p>
+  <p class="caption">FIG 2 — Every used pin. Pins marked "unused" stay free (UART5 on 8/10 is handy for a debug console later).</p>
 </section>
 
 <!-- ============================== 04 WIRING ============================== -->
@@ -556,6 +560,64 @@ svg text { font-family: var(--mono); }
   one leg and daisy-chain the other legs together with a single run of hookup wire ending at
   header pin 9 (any GND pin works: 6, 9, 14, 20, 25).</p>
 
+  <h3>Hot shoe — flash trigger through a MOC3021 opto-triac</h3>
+  <div class="figure">
+    <svg viewBox="0 0 880 250" role="img" aria-label="Hot shoe trigger circuit: header pin 12 through a 330 ohm resistor into MOC3021 pin 1, pin 2 to ground on header pin 14; output pin 6 to the shoe center contact and pin 4 to the shoe metal frame.">
+      <text x="440" y="24" text-anchor="middle" class="svg-title">FLASH TRIGGER — GALVANICALLY ISOLATED, POLARITY-AGNOSTIC</text>
+      <!-- header stub -->
+      <rect x="40" y="60" width="120" height="130" rx="4" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="100" y="90" text-anchor="middle" class="svg-part" font-weight="bold">header</text>
+      <text x="100" y="122" text-anchor="middle" class="svg-dim">pin 12 · PC11</text>
+      <text x="100" y="172" text-anchor="middle" class="svg-dim">pin 14 · GND</text>
+      <!-- resistor -->
+      <line x1="160" y1="115" x2="255" y2="115" stroke="var(--copper)" stroke-width="2.5"/>
+      <rect x="255" y="103" width="80" height="24" fill="var(--panel)" stroke="var(--copper)" stroke-width="2"/>
+      <text x="295" y="119" text-anchor="middle" class="svg-dim" fill="var(--copper)">330 Ω</text>
+      <line x1="335" y1="115" x2="430" y2="115" stroke="var(--copper)" stroke-width="2.5"/>
+      <!-- gnd wire -->
+      <line x1="160" y1="165" x2="430" y2="165" stroke="var(--w-gnd)" stroke-width="2.5"/>
+      <!-- opto -->
+      <rect x="430" y="80" width="170" height="120" rx="4" fill="var(--panel)" stroke="var(--ink)" stroke-width="2.5"/>
+      <text x="515" y="130" text-anchor="middle" class="svg-part" font-weight="bold">MOC3021</text>
+      <text x="515" y="150" text-anchor="middle" class="svg-dim">opto-triac · DIP-6</text>
+      <g class="pin-num">
+        <text x="440" y="112">1</text><text x="440" y="170">2</text>
+        <text x="584" y="112">6</text><text x="584" y="170">4</text>
+      </g>
+      <!-- outputs -->
+      <line x1="600" y1="108" x2="700" y2="108" stroke="var(--ink)" stroke-width="2.5"/>
+      <line x1="600" y1="165" x2="700" y2="165" stroke="var(--ink)" stroke-width="2.5"/>
+      <!-- shoe -->
+      <rect x="700" y="70" width="150" height="130" rx="8" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
+      <circle cx="775" cy="112" r="9" fill="var(--copper)" stroke="var(--ink)"/>
+      <text x="775" y="140" text-anchor="middle" class="svg-dim">center contact</text>
+      <text x="775" y="184" text-anchor="middle" class="svg-dim">metal frame</text>
+      <text x="775" y="62" text-anchor="middle" class="svg-part" font-weight="bold">hot shoe</text>
+      <!-- unused pins note -->
+      <text x="515" y="220" text-anchor="middle" class="svg-dim">pins 3 and 5: not connected</text>
+    </svg>
+  </div>
+  <p class="caption">FIG 4 — Hot shoe trigger. The opto-triac isolates the Pi from the flash's sync voltage (old flashes can carry 100&nbsp;V+) and conducts either polarity, so center/frame orientation never matters.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>MOC3021 pin</th><th>Connects to</th><th>Header pin</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">1 — LED anode</td><td>330 Ω resistor → PC11</td><td class="mono">12</td></tr>
+        <tr><td class="mono">2 — LED cathode</td><td>GND</td><td class="mono">14</td></tr>
+        <tr><td class="mono">6 — main terminal</td><td>shoe center contact</td><td class="mono">—</td></tr>
+        <tr><td class="mono">4 — main terminal</td><td>shoe metal frame</td><td class="mono">—</td></tr>
+        <tr><td class="mono">3, 5</td><td>not connected</td><td class="mono">—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Enable with <code>HOTSHOE_ENABLED=1</code> in <span class="mono">.env</span>
+  (<code>HOTSHOE_PIN=75</code>, <code>HOTSHOE_PULSE_MS=200</code> are the defaults). The app
+  fires the trigger on every shutter press and holds the capture until the next camera frame,
+  so the flash lights the photo that gets sent for generation.</p>
+  <div class="callout"><strong>If the flash won't fire:</strong> 3.3 V through 330 Ω is ≈6 mA of
+  LED current — below the MOC3021's guaranteed 15 mA trigger (most parts fire anyway). Swap in a
+  <strong>MOC3023</strong> (5 mA guaranteed, identical pinout), or drop the resistor to 150 Ω.</div>
+
   <h3>Power &amp; camera — plug-in, no soldering to the Pi</h3>
   <div class="tablewrap">
     <table>
@@ -585,6 +647,7 @@ svg text { font-family: var(--mono); }
         <tr><td>Back (user side)</td><td>Display window</td><td class="mono">69 × 47 mm ✱</td><td>active area 67.6 × 45.1 mm + 0.7 mm clearance per side</td></tr>
         <tr><td>Back</td><td>4× button holes</td><td class="mono">14 × 14 mm each</td><td>UP / DOWN / ALBUM / PROMPT switches snap into 1.2–1.5 mm wall</td></tr>
         <tr><td>Top</td><td>1× button hole</td><td class="mono">14 × 14 mm</td><td>SHUTTER — index finger position, like a real camera</td></tr>
+        <tr><td>Top</td><td>Hot shoe mount</td><td class="mono">shoe ≈ 21 mm rail width ✱</td><td>screw or bolt the shoe through the top wall; route the two trigger wires inside</td></tr>
         <tr><td>Front (subject side)</td><td>Lens hole</td><td class="mono">Ø 15 mm ✱</td><td>camera lens barrel; chamfer the edge so it doesn't vignette</td></tr>
         <tr><td>Side</td><td>Charge port slot</td><td class="mono">≈ 10 × 4 mm ✱</td><td>battery PCB's charging connector</td></tr>
         <tr><td>Side</td><td>Power switch hole</td><td class="mono">per switch (B6)</td><td>master on/off</td></tr>
@@ -632,7 +695,7 @@ svg text { font-family: var(--mono); }
       <text x="775" y="140" class="svg-dim" transform="rotate(90 775 140)">14 × 14 mm · ≥ 5 mm apart</text>
     </svg>
   </div>
-  <p class="caption">FIG 4 — Back panel. Camera-style: screen left under the thumbless zone, UI column under the right thumb, shutter on the top edge under the index finger. PROMPT sits below ALBUM (or wherever the column fits your case height).</p>
+  <p class="caption">FIG 5 — Back panel. Camera-style: screen left under the thumbless zone, UI column under the right thumb, shutter on the top edge under the index finger. PROMPT sits below ALBUM (or wherever the column fits your case height).</p>
 
   <div class="check"><strong>Keycap clearance:</strong> MX switches need ≈ 11.6 mm of free depth
   behind the plate plus the keycap in front. Leave at least 8 mm between the button column and
@@ -677,7 +740,7 @@ svg text { font-family: var(--mono); }
       <text x="878" y="200" class="svg-dim" transform="rotate(90 878 200)">vents near SoC</text>
     </svg>
   </div>
-  <p class="caption">FIG 5 — Three thermal/weight zones: hot Pi in the middle with vents beside it, heavy cells low at the front for grip balance, display sandwiched to the back wall.</p>
+  <p class="caption">FIG 6 — Three thermal/weight zones: hot Pi in the middle with vents beside it, heavy cells low at the front for grip balance, display sandwiched to the back wall.</p>
   <ul>
     <li><strong>Depth budget:</strong> display module (~9 mm) + Pi with headers (~18 mm) + Dupont bend radius ≈ a case around <span class="mono">40–45 mm</span> deep. Cells lie flat in the same depth.</li>
     <li><strong>Wire dressing:</strong> the 13 header wires leave the Pi as one ribbon; fold once and tape to the case floor so they can't touch the SoC.</li>
@@ -708,7 +771,7 @@ svg text { font-family: var(--mono); }
 </section>
 
 <footer>
-  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV A</span>
+  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV B</span>
   <span>full software docs: <span class="mono">HARDWARE.md</span> in the repo</span>
 </footer>
 

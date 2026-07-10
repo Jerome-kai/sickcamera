@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import time
 import unittest
+from unittest import mock
 
 from PIL import Image
 
@@ -51,6 +54,49 @@ class ImportSurfaceTests(unittest.TestCase):
 
         self.assertTrue(hasattr(opi_hw.DisplayHATMini, "BUTTON_SHUTTER"))
         self.assertIs(opi_hw.Picamera2, opi_hw.UsbCamera)
+
+
+class _FakeOutputs:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, bool]] = []
+        self.released = False
+
+    def set(self, line: int, high: bool) -> None:
+        self.calls.append((line, high))
+
+    def release(self) -> None:
+        self.released = True
+
+
+class HotShoeTests(unittest.TestCase):
+    def _make(self, fake: _FakeOutputs, env: dict[str, str]):
+        from imagegencam import opi_hw
+
+        with mock.patch.dict(os.environ, env):
+            with mock.patch.object(opi_hw.sunxi_gpio, "request_outputs", return_value=fake):
+                return opi_hw.HotShoe()
+
+    def test_fire_pulses_configured_pin_high_then_low(self) -> None:
+        fake = _FakeOutputs()
+        shoe = self._make(fake, {"HOTSHOE_PIN": "75", "HOTSHOE_PULSE_MS": "1"})
+
+        shoe.fire()
+        deadline = time.monotonic() + 1.0
+        while len(fake.calls) < 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+
+        self.assertEqual(fake.calls[0], (75, True))
+        self.assertEqual(fake.calls[1], (75, False))
+
+    def test_close_drives_low_and_releases(self) -> None:
+        fake = _FakeOutputs()
+        shoe = self._make(fake, {"HOTSHOE_PULSE_MS": "60000"})
+
+        shoe.fire()
+        shoe.close()
+
+        self.assertEqual(fake.calls[-1], (75, False))
+        self.assertTrue(fake.released)
 
 
 if __name__ == "__main__":

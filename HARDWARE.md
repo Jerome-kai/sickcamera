@@ -68,6 +68,37 @@ No resistors needed.
 All pin assignments are overridable in `.env` (`BUTTON_*_PIN`, `DISPLAY_*_PIN`) if your
 chassis routing prefers different pins.
 
+## Hot shoe flash trigger (optional)
+
+A standard hot-shoe socket fired through a **MOC3021** opto-triac on **PC11**
+(header pin 12, gpiod line 75). The triac isolates the board from the flash's
+sync voltage (old flashes can put 100 V+ on the shoe) and conducts either
+polarity, so center/frame orientation doesn't matter.
+
+```
+PC11 (pin 12) ──330Ω── 1 ┌─────────┐ 6 ── shoe center contact
+                         │ MOC3021 │
+GND  (pin 14) ──────── 2 └─────────┘ 4 ── shoe metal frame
+```
+
+| MOC3021 pin | Connects to | Header pin |
+|---|---|---|
+| 1 (LED anode) | 330Ω resistor → PC11 | 12 |
+| 2 (LED cathode) | GND | 14 |
+| 6 (main terminal) | hot shoe center contact | — |
+| 4 (main terminal) | hot shoe metal frame | — |
+| 3, 5 | not connected | — |
+
+Enable in `.env`: `HOTSHOE_ENABLED=1` (pin and pulse length via `HOTSHOE_PIN`,
+`HOTSHOE_PULSE_MS`). The app fires the trigger on every shutter capture and
+waits for the next camera frame so the flash lights the photo that gets sent
+for generation.
+
+**If the flash doesn't fire reliably:** 3.3 V through 330Ω puts ≈6 mA through
+the LED, below the MOC3021's guaranteed 15 mA trigger current (most units fire
+anyway). Fixes, in order of preference: use a **MOC3023** (5 mA guaranteed
+trigger, same pinout), or drop the resistor to 150Ω.
+
 ## Camera
 
 USB UVC board camera into the USB-A port → `/dev/video0`. Check with:

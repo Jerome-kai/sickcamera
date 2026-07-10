@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import time
+from threading import Timer
 
 from PIL import Image
 
@@ -76,6 +77,48 @@ class DisplayHATMini:
     def set_led(self, r: float, g: float, b: float) -> None:
         # No RGB LED on this build.
         pass
+
+
+class HotShoe:
+    """Flash trigger: hot-shoe sync contact switched by a MOC3021 opto-triac.
+
+    GPIO --330R--> pin 1 (LED anode), pin 2 -> GND. Output side: pin 6 -> shoe
+    center contact, pin 4 -> shoe metal frame. The triac is polarity-agnostic
+    and isolates the board from the flash's sync voltage (old flashes can put
+    100V+ on the shoe). Once triggered it latches until the flash's own sync
+    current stops, so the xenon burst fires at the leading edge of the pulse.
+    """
+
+    def __init__(self) -> None:
+        self.pin = _env_int("HOTSHOE_PIN", 75)  # PC11, header pin 12
+        self.pulse_seconds = max(1, _env_int("HOTSHOE_PULSE_MS", 200)) / 1000.0
+        self._outputs = sunxi_gpio.request_outputs([self.pin], consumer="imagegencam-hotshoe")
+        self._off_timer: Timer | None = None
+
+    def fire(self) -> None:
+        """Assert the trigger now; release it after the pulse in the background.
+
+        The long default pulse (200 ms) is deliberate: a xenon flash latches
+        the triac and fires instantly, while LED "flashes" that only light
+        while the contact is closed stay on across the next camera frame.
+        """
+        if self._off_timer is not None:
+            self._off_timer.cancel()
+        self._outputs.set(self.pin, True)
+        self._off_timer = Timer(self.pulse_seconds, self._outputs.set, args=(self.pin, False))
+        self._off_timer.daemon = True
+        self._off_timer.start()
+
+    def close(self) -> None:
+        if self._off_timer is not None:
+            self._off_timer.cancel()
+            self._off_timer = None
+        try:
+            self._outputs.set(self.pin, False)
+        finally:
+            release = getattr(self._outputs, "release", None)
+            if release:
+                release()
 
 
 class UsbCamera:

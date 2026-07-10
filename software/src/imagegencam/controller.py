@@ -303,6 +303,7 @@ class ImageGenCamController:
         self._show_boot_screen()
         self._setup_camera()
         self._setup_buttons()
+        self._setup_hot_shoe()
         self._setup_pisugar_battery_bus()
         self.pisugar_shortcut_button_configured = self._configure_pisugar_shortcut_button()
         self.capture_worker_thread = Thread(target=self._capture_worker_loop, daemon=True)
@@ -396,6 +397,43 @@ class ImageGenCamController:
         time.sleep(1.0)
         self.camera_thread = Thread(target=self._camera_capture_loop, daemon=True)
         self.camera_thread.start()
+
+    def _setup_hot_shoe(self) -> None:
+        self.hot_shoe = None
+        if os.environ.get("HOTSHOE_ENABLED", "0").strip().lower() not in {"1", "true", "yes", "on"}:
+            return
+        hot_shoe_cls = getattr(self.displayhatmini, "HotShoe", None)
+        if hot_shoe_cls is None:
+            logger.warning("HOTSHOE_ENABLED is set but this hardware stack has no hot shoe support")
+            return
+        try:
+            self.hot_shoe = hot_shoe_cls()
+            logger.info("Hot shoe trigger ready on line %s", self.hot_shoe.pin)
+        except Exception:
+            logger.exception("Hot shoe setup failed; continuing without flash")
+
+    def _grab_capture_frames(self) -> tuple[Image.Image | None, Image.Image | None]:
+        """Copy the current preview frames for a capture. With a hot shoe
+        fitted, fire the flash first and wait for a frame whose exposure
+        started after the trigger, so the flash actually lights the photo."""
+        if self.hot_shoe is not None:
+            with self.latest_frame_lock:
+                baseline_id = self.latest_preview_frame_id
+            try:
+                self.hot_shoe.fire()
+            except Exception:
+                logger.exception("Hot shoe trigger failed")
+            else:
+                deadline = time.monotonic() + max(0.5, 3.0 / self.frame_rate)
+                while time.monotonic() < deadline:
+                    with self.latest_frame_lock:
+                        if self.latest_preview_frame_id >= baseline_id + 2:
+                            break
+                    time.sleep(0.005)
+        with self.latest_frame_lock:
+            display_frame = self.latest_display_frame.copy() if self.latest_display_frame else None
+            source_frame = self.latest_preview_frame.copy() if self.latest_preview_frame else None
+        return display_frame, source_frame
 
     def _camera_capture_loop(self) -> None:
         while self.running:
@@ -2574,9 +2612,7 @@ class ImageGenCamController:
                 self.state.status_message = "Magic prompt is still being written"
             return
 
-        with self.latest_frame_lock:
-            display_frame = self.latest_display_frame.copy() if self.latest_display_frame else None
-            source_frame = self.latest_preview_frame.copy() if self.latest_preview_frame else None
+        display_frame, source_frame = self._grab_capture_frames()
 
         if display_frame is None or source_frame is None:
             with self.state_lock:
@@ -2610,9 +2646,7 @@ class ImageGenCamController:
                 self.state.status_message = "Press the shortcut button to create a magic prompt first"
             return
 
-        with self.latest_frame_lock:
-            display_frame = self.latest_display_frame.copy() if self.latest_display_frame else None
-            source_frame = self.latest_preview_frame.copy() if self.latest_preview_frame else None
+        display_frame, source_frame = self._grab_capture_frames()
 
         if display_frame is None or source_frame is None:
             with self.state_lock:
@@ -2656,9 +2690,7 @@ class ImageGenCamController:
                 self.state.status_message = "Queue full. Wait for album."
             return
 
-        with self.latest_frame_lock:
-            display_frame = self.latest_display_frame.copy() if self.latest_display_frame else None
-            source_frame = self.latest_preview_frame.copy() if self.latest_preview_frame else None
+        display_frame, source_frame = self._grab_capture_frames()
 
         if display_frame is None or source_frame is None:
             with self.state_lock:
@@ -3402,6 +3434,11 @@ class ImageGenCamController:
             self.picam2.stop()
         except Exception:
             pass
+        if getattr(self, "hot_shoe", None) is not None:
+            try:
+                self.hot_shoe.close()
+            except Exception:
+                pass
         try:
             self._set_led(0.0, 0.0, 0.0)
         except Exception:
