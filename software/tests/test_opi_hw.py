@@ -32,6 +32,22 @@ class RGB565ConversionTests(unittest.TestCase):
         self.assertEqual(len(ST7796.to_rgb565_bytes(image)), WIDTH * HEIGHT * 2)
 
 
+class PanelControllerTests(unittest.TestCase):
+    def test_default_is_st7796_480x320(self) -> None:
+        panel = ST7796()
+        self.assertEqual(panel.controller, "st7796")
+        self.assertEqual((panel.width, panel.height), (WIDTH, HEIGHT))
+
+    def test_ili9341_is_320x240(self) -> None:
+        panel = ST7796(controller="ili9341")
+        self.assertEqual((panel.width, panel.height), (320, 240))
+        with mock.patch.dict(os.environ, {"DISPLAY_CONTROLLER": "ili9341"}):
+            self.assertEqual(ST7796().controller, "ili9341")
+
+    def test_unknown_controller_falls_back_to_st7796(self) -> None:
+        self.assertEqual(ST7796(controller="nonsense").controller, "st7796")
+
+
 class SunxiPullRegisterTests(unittest.TestCase):
     def test_pull_register_math(self) -> None:
         from imagegencam.sunxi_gpio import pull_register

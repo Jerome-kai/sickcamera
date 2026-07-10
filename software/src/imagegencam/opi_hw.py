@@ -18,7 +18,7 @@ from threading import Timer
 from PIL import Image
 
 from . import sunxi_gpio
-from .st7796 import ST7796, WIDTH as PANEL_WIDTH, HEIGHT as PANEL_HEIGHT
+from .st7796 import ST7796
 
 
 def _env_int(name: str, default: int) -> int:
@@ -37,8 +37,8 @@ class DisplayHATMini:
     def __init__(self, buffer: Image.Image, backlight_pwm: bool = True) -> None:
         self._buffer = buffer
         self._fit_mode = os.environ.get("DISPLAY_FIT", "pillarbox").strip().lower()
-        self._canvas = Image.new("RGB", (PANEL_WIDTH, PANEL_HEIGHT))
         self._panel = ST7796()
+        self._canvas = Image.new("RGB", (self._panel.width, self._panel.height))
         self._panel.open()
 
         button_pins = [
@@ -53,13 +53,17 @@ class DisplayHATMini:
         )
 
     def display(self) -> None:
-        if self._fit_mode == "stretch":
-            frame = self._buffer.resize((PANEL_WIDTH, PANEL_HEIGHT), Image.Resampling.BILINEAR)
+        panel_width, panel_height = self._panel.width, self._panel.height
+        if self._buffer.size == (panel_width, panel_height):
+            # Pixel-perfect panel (e.g. 320x240 ILI9341): no scaling needed.
+            frame = self._buffer
+        elif self._fit_mode == "stretch":
+            frame = self._buffer.resize((panel_width, panel_height), Image.Resampling.BILINEAR)
         else:
             # Pillarbox: 4:3 buffer scaled to panel height, centered on black.
-            scaled_width = PANEL_HEIGHT * self._buffer.width // self._buffer.height
-            scaled = self._buffer.resize((scaled_width, PANEL_HEIGHT), Image.Resampling.BILINEAR)
-            self._canvas.paste(scaled, ((PANEL_WIDTH - scaled_width) // 2, 0))
+            scaled_width = panel_height * self._buffer.width // self._buffer.height
+            scaled = self._buffer.resize((scaled_width, panel_height), Image.Resampling.BILINEAR)
+            self._canvas.paste(scaled, ((panel_width - scaled_width) // 2, 0))
             frame = self._canvas
         self._panel.show(frame)
 

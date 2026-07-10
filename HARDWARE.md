@@ -8,7 +8,7 @@ Parts used:
 | Part | Replaces |
 |---|---|
 | Orange Pi Zero 2 | Raspberry Pi Zero 2 W |
-| 3.2" SPI TFT, **ST7796U**, 480×320 | Pimoroni Display HAT Mini (ST7789, 320×240) |
+| 2.8" SPI TFT, **ILI9341**, 240×320, capacitive touch (touch unused) | Pimoroni Display HAT Mini (ST7789, 320×240) |
 | 5× mechanical keyboard switches | HAT's 4 buttons + PiSugar shutter button |
 | 3.6mm USB UVC board camera | CSI Spy Camera for Pi Zero |
 | Dual-18650 power bank PCB (5V/2A boost out) | PiSugar 3 |
@@ -34,22 +34,39 @@ Parts used:
 libgpiod line numbers on `/dev/gpiochip0` are `port_index × 32 + pin`:
 **PCn = 64+n, PHn = 224+n** (e.g. PC9 → 73). Verify with `gpioinfo`.
 
-## Display wiring (ST7796U over SPI1)
+## Display wiring (SPI1)
 
-| Display pin | Header pin | Signal | gpiod line |
-|---|---|---|---|
-| VCC | 17 | 3.3V | — |
-| GND | 20 | GND | — |
-| CS | 24 | PH9 / SPI1_CS0 (hardware CS) | — |
-| RESET | 22 | PC7 | 71 |
-| DC / RS | 26 | PC10 | 74 |
-| SDI / MOSI | 19 | PH7 / SPI1_MOSI | — |
-| SCK | 23 | PH6 / SPI1_CLK | — |
-| LED (backlight) | 16 | PC15 | 79 |
-| SDO / MISO | — | not connected | — |
+Two panel types are supported — set `DISPLAY_CONTROLLER` in `.env`:
 
-If your module has touch-controller pins (T_CLK, T_CS, T_DIN, T_DO, T_IRQ), leave them
-unconnected — touch is not used.
+- **`ili9341`** — 2.8" 240×320 modules ("2.8 TFT SPI 240X320 V1.0", including the
+  capacitive-touch version with the 14-pin header). Runs 320×240 landscape, a
+  pixel-perfect match for the app's UI (no scaling).
+- **`st7796`** — 3.2" 480×320 ST7796S/U modules. The 320×240 UI is upscaled and
+  pillarboxed.
+
+Both wire to the **same header pins**; only the pin names printed on the module differ:
+
+| 2.8" module (14P) | 3.2" ST7796 module | Header pin | Signal | gpiod line |
+|---|---|---|---|---|
+| VCC | VCC | 17 | 3.3V | — |
+| GND | GND | 20 | GND | — |
+| LCD_CS | CS | 24 | PH9 / SPI1_CS0 (hardware CS) | — |
+| LCD_RST | RESET | 22 | PC7 | 71 |
+| LCD_RS | DC / RS | 26 | PC10 | 74 |
+| SDI (MOSI) | SDI / MOSI | 19 | PH7 / SPI1_MOSI | — |
+| SCK | SCK | 23 | PH6 / SPI1_CLK | — |
+| LED | LED (backlight) | 16 | PC15 | 79 |
+| SDO (MISO) | SDO / MISO | — | not connected | — |
+| CTP_SCL / CTP_SDA / CTP_RST / CTP_INT | T_* touch pins | — | not connected (touch unused) | — |
+| SD_CS | — | — | not connected (SD slot unused) | — |
+
+Backlight note: the LED pin is driven directly from PC15. If the backlight is dim
+or the board browns out when it switches on (some modules draw 50 mA+ on LED),
+wire LED to 3.3V (pin 1) instead for an always-on backlight — the software copes,
+`set_backlight` just stops having a visible effect.
+
+If the 2.8" panel shows garbage at 40 MHz SPI, drop `DISPLAY_SPI_HZ` to `24000000`
+(ILI9341 is officially slower than ST7796; most modules still take 40 MHz fine).
 
 ## Button wiring (5 mechanical switches)
 
