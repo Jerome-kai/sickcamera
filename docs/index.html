@@ -268,7 +268,7 @@ svg text { font-family: var(--mono); }
 <header class="masthead">
   <div class="doc-id">
     <span>IMAGEGENCAM · ORANGE PI ZERO 2 BUILD</span>
-    <span>REV C · 2026-07</span>
+    <span>REV D · 2026-07</span>
     <span>SHEET 1 / 1</span>
   </div>
   <h1>Enclosure &amp; wiring reference</h1>
@@ -304,8 +304,8 @@ svg text { font-family: var(--mono); }
       <text x="440" y="180" text-anchor="middle" class="svg-dim">runs the whole app</text>
       <!-- display -->
       <rect x="680" y="40" width="190" height="80" rx="4" fill="none" stroke="var(--ink)" stroke-width="2"/>
-      <text x="775" y="72" text-anchor="middle" class="svg-part" font-weight="bold">2.8″ ILI9341</text>
-      <text x="775" y="92" text-anchor="middle" class="svg-dim">240 × 320 · SPI</text>
+      <text x="775" y="72" text-anchor="middle" class="svg-part" font-weight="bold">3.5″ ST7796U</text>
+      <text x="775" y="92" text-anchor="middle" class="svg-dim">480 × 320 · SPI</text>
       <!-- buttons -->
       <rect x="680" y="150" width="190" height="60" rx="4" fill="none" stroke="var(--ink)" stroke-width="2"/>
       <text x="775" y="176" text-anchor="middle" class="svg-part" font-weight="bold">5× MX switches</text>
@@ -341,7 +341,7 @@ svg text { font-family: var(--mono); }
       <thead><tr><th>#</th><th>Part</th><th>Footprint to plan around</th><th>Mounting</th></tr></thead>
       <tbody>
         <tr><td class="mono">A1</td><td>Orange Pi Zero 2</td><td class="mono">53 × 60 mm, ~18 mm tall with headers</td><td>4× M2.5 holes in the corners</td></tr>
-        <tr><td class="mono">A2</td><td>2.8″ ILI9341 SPI display module, 240×320, capacitive touch <span class="dim">(touch + SD slot unused)</span></td><td class="mono">≈ 50 × 86 mm PCB · active area 43.2 × 57.6 mm portrait, mounted landscape <span class="dim">(measure yours)</span></td><td>4× M3 holes in the PCB corners</td></tr>
+        <tr><td class="mono">A2</td><td>3.5″ ST7796U SPI display, 320×480 IPS, capacitive touch (lcdwiki MSP3526) <span class="dim">(touch + FPC unused)</span></td><td class="mono">55.5 × 98 mm PCB, ≈13 mm thick with pins · active area 49.0 × 73.4 mm portrait, mounted landscape</td><td>4× M3 holes in the PCB corners</td></tr>
         <tr><td class="mono">A3</td><td>5× mechanical keyboard switches (MX)</td><td class="mono">15.6 × 15.6 mm body · 11.6 mm above plate + keycap</td><td>14 × 14 mm plate cutout, 1.2–1.5 mm plate</td></tr>
         <tr><td class="mono">A4</td><td>USB UVC board camera, 3.6 mm lens</td><td class="mono">small square PCB, lens barrel ≈ Ø14 mm <span class="dim">(measure yours)</span></td><td>2 screw holes or a printed clamp</td></tr>
         <tr><td class="mono">A5</td><td>Dual-18650 power bank PCB (5 V/2 A out)</td><td class="mono">PCB varies · each cell Ø18 × 65 mm</td><td>cell holder clips or printed cradle</td></tr>
@@ -441,7 +441,7 @@ svg text { font-family: var(--mono); }
         <text x="415" y="249" font-weight="bold">PC6 — DOWN button</text>
         <text x="415" y="286" font-weight="bold">PC5 — UP button</text>
         <text x="415" y="323" font-weight="bold">PC8 — ALBUM button</text>
-        <text x="415" y="360" font-weight="bold">3.3 V — display VCC</text>
+        <text x="415" y="360">3.3 V — spare</text>
         <text x="415" y="397" font-weight="bold">PH7 — SPI1 MOSI → display SDI</text>
         <text x="415" y="434">PH8 · SPI1 MISO — unused</text>
         <text x="415" y="471" font-weight="bold">PH6 — SPI1 CLK → display SCK</text>
@@ -449,16 +449,16 @@ svg text { font-family: var(--mono); }
       </g>
       <!-- right labels (even pins) -->
       <g class="pin-label" text-anchor="start" fill="var(--ink)">
-        <text x="525" y="64">5 V</text>
-        <text x="525" y="101">5 V</text>
-        <text x="525" y="138">GND</text>
+        <text x="525" y="64" font-weight="bold">5 V — display VCC</text>
+        <text x="525" y="101">5 V — spare</text>
+        <text x="525" y="138" font-weight="bold">GND — display GND</text>
         <text x="525" y="175">PH2 · unused</text>
         <text x="525" y="212">PH3 · unused</text>
         <text x="525" y="249" font-weight="bold">PC11 — FLASH trigger (hot shoe)</text>
         <text x="525" y="286">GND — hot shoe opto</text>
         <text x="525" y="323" font-weight="bold">PC15 — display BACKLIGHT</text>
         <text x="525" y="360" font-weight="bold">PC14 — PROMPT button</text>
-        <text x="525" y="397" font-weight="bold">GND — display GND</text>
+        <text x="525" y="397">GND — spare</text>
         <text x="525" y="434" font-weight="bold">PC7 — display RESET</text>
         <text x="525" y="471" font-weight="bold">PH9 — SPI1 CS0 → display CS</text>
         <text x="525" y="508" font-weight="bold">PC10 — display DC / RS</text>
@@ -483,13 +483,13 @@ svg text { font-family: var(--mono); }
 <section id="wiring">
   <h2><span class="sec-no">04</span>Wiring schematic</h2>
 
-  <h3>Display — 2.8″ ILI9341 over SPI1 (8 wires from the 14P header)</h3>
+  <h3>Display — 3.5″ ST7796U (MSP3526) over SPI1 (8 wires from the 14P header)</h3>
   <div class="tablewrap">
     <table>
       <thead><tr><th>Wire</th><th>Module pin (14P)</th><th>Header pin</th><th>Signal</th><th>gpiod line</th></tr></thead>
       <tbody>
-        <tr><td><span class="swatch" style="background:var(--w-33v)"></span><span class="mono">orange</span></td><td class="mono">VCC</td><td class="mono">17</td><td>3.3 V</td><td class="mono">—</td></tr>
-        <tr><td><span class="swatch" style="background:var(--w-gnd)"></span><span class="mono">black</span></td><td class="mono">GND</td><td class="mono">20</td><td>ground</td><td class="mono">—</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-5v)"></span><span class="mono">red</span></td><td class="mono">VCC</td><td class="mono">2</td><td><strong>5 V</strong> — module spec is 5.0 V / 0.5 W (onboard regulator)</td><td class="mono">—</td></tr>
+        <tr><td><span class="swatch" style="background:var(--w-gnd)"></span><span class="mono">black</span></td><td class="mono">GND</td><td class="mono">6</td><td>ground</td><td class="mono">—</td></tr>
         <tr><td><span class="swatch" style="background:var(--w-spi)"></span><span class="mono">blue</span></td><td class="mono">LCD_CS</td><td class="mono">24</td><td>PH9 / SPI1 CS0 (hardware)</td><td class="mono">—</td></tr>
         <tr><td><span class="swatch" style="background:var(--w-ctl)"></span><span class="mono">purple</span></td><td class="mono">LCD_RST</td><td class="mono">22</td><td>PC7</td><td class="mono">71</td></tr>
         <tr><td><span class="swatch" style="background:var(--w-ctl)"></span><span class="mono">grey</span></td><td class="mono">LCD_RS</td><td class="mono">26</td><td>PC10 — data/command</td><td class="mono">74</td></tr>
@@ -500,12 +500,13 @@ svg text { font-family: var(--mono); }
     </table>
   </div>
   <p>Leave unconnected: <span class="mono">SDO (MISO)</span>, the four capacitive-touch pins
-  (<span class="mono">CTP_SCL, CTP_SDA, CTP_RST, CTP_INT</span>) and <span class="mono">SD_CS</span> —
-  the app uses neither touch nor the SD slot. Set <code>DISPLAY_CONTROLLER=ili9341</code> in
-  <span class="mono">.env</span>; the panel's 320 × 240 landscape mode matches the UI pixel-for-pixel.
-  If the backlight is dim or the board browns out (LED can draw 50 mA+), move LED to 3.3 V
-  (pin 1) for always-on instead. The Dupont colors are only a suggestion; what matters is
-  writing down what you used.</p>
+  (<span class="mono">CTP_SCL, CTP_SDA, CTP_RST, CTP_INT</span> — the FT6336U touch controller is
+  unused) and the 14P FPC connector, which just duplicates these signals. The SPI/control lines
+  are 3.3 V logic — fine alongside the 5 V supply. <code>DISPLAY_CONTROLLER=st7796</code> is the
+  default, so no <span class="mono">.env</span> change is needed; the 320 × 240 UI is upscaled to
+  480 × 320. Backlight (6 white LEDs, 95 mA total) is switched via the LED control input from
+  PC15; if it misbehaves, tie LED to 3.3 V (pin 1) for always-on instead. The Dupont colors are
+  only a suggestion; what matters is writing down what you used.</p>
 
   <h3>Buttons — 5 switches, 6 wires total</h3>
   <div class="figure">
@@ -648,7 +649,7 @@ svg text { font-family: var(--mono); }
     <table>
       <thead><tr><th>Face</th><th>Cutout</th><th>Size</th><th>For</th></tr></thead>
       <tbody>
-        <tr><td>Back (user side)</td><td>Display window</td><td class="mono">59 × 45 mm ✱</td><td>2.8″ active area 57.6 × 43.2 mm (landscape) + 0.7 mm clearance per side</td></tr>
+        <tr><td>Back (user side)</td><td>Display window</td><td class="mono">75 × 50 mm ✱</td><td>3.5″ active area 73.4 × 49.0 mm (landscape) + clearance; touch glass is 74.0 × 49.6 mm</td></tr>
         <tr><td>Back</td><td>4× button holes</td><td class="mono">14 × 14 mm each</td><td>UP / DOWN / ALBUM / PROMPT switches snap into 1.2–1.5 mm wall</td></tr>
         <tr><td>Top</td><td>1× button hole</td><td class="mono">14 × 14 mm</td><td>SHUTTER — index finger position, like a real camera</td></tr>
         <tr><td>Top</td><td>Hot shoe mount</td><td class="mono">shoe ≈ 21 mm rail width ✱</td><td>screw or bolt the shoe through the top wall; route the two trigger wires inside</td></tr>
@@ -672,7 +673,7 @@ svg text { font-family: var(--mono); }
       <rect x="165" y="105" width="366" height="249" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-dasharray="7 5"/>
       <rect x="150" y="90" width="396" height="279" fill="none" stroke="var(--line-strong)" stroke-width="1.5"/>
       <text x="348" y="230" text-anchor="middle" class="svg-part" font-weight="bold">DISPLAY WINDOW</text>
-      <text x="348" y="250" text-anchor="middle" class="svg-dim">59 × 45 mm cutout</text>
+      <text x="348" y="250" text-anchor="middle" class="svg-dim">75 × 50 mm cutout</text>
       <text x="348" y="268" text-anchor="middle" class="svg-dim">module PCB behind (grey outline)</text>
       <!-- 4 buttons column: 14x14mm -> 74px, spaced -->
       <g>
@@ -693,9 +694,9 @@ svg text { font-family: var(--mono); }
       </g>
       <!-- dimension marks -->
       <line x1="165" y1="392" x2="531" y2="392" stroke="var(--muted)" stroke-width="1"/>
-      <text x="348" y="406" text-anchor="middle" class="svg-dim">59 mm</text>
+      <text x="348" y="406" text-anchor="middle" class="svg-dim">75 mm</text>
       <line x1="140" y1="105" x2="140" y2="354" stroke="var(--muted)" stroke-width="1"/>
-      <text x="132" y="234" text-anchor="end" class="svg-dim">45 mm</text>
+      <text x="132" y="234" text-anchor="end" class="svg-dim">50 mm</text>
       <text x="775" y="140" class="svg-dim" transform="rotate(90 775 140)">14 × 14 mm · ≥ 5 mm apart</text>
     </svg>
   </div>
@@ -715,7 +716,7 @@ svg text { font-family: var(--mono); }
       <rect x="60" y="50" width="800" height="290" rx="14" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
       <!-- display against back (top) wall -->
       <rect x="120" y="62" width="500" height="46" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
-      <text x="370" y="91" text-anchor="middle" class="svg-part" font-weight="bold">2.8″ display module — flat against back wall (M3 standoffs)</text>
+      <text x="370" y="91" text-anchor="middle" class="svg-part" font-weight="bold">3.5″ display module — flat against back wall (M3 standoffs)</text>
       <!-- buttons zone -->
       <rect x="660" y="62" width="160" height="46" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6 4"/>
       <text x="740" y="91" text-anchor="middle" class="svg-dim">button column</text>
@@ -775,7 +776,7 @@ svg text { font-family: var(--mono); }
 </section>
 
 <footer>
-  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV C</span>
+  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV D</span>
   <span>full software docs: <span class="mono">HARDWARE.md</span> in the repo</span>
 </footer>
 
