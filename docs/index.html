@@ -268,7 +268,7 @@ svg text { font-family: var(--mono); }
 <header class="masthead">
   <div class="doc-id">
     <span>IMAGEGENCAM · ORANGE PI ZERO 2 BUILD</span>
-    <span>REV D · 2026-07</span>
+    <span>REV E · 2026-07</span>
     <span>SHEET 1 / 1</span>
   </div>
   <h1>Enclosure &amp; wiring reference</h1>
@@ -294,9 +294,9 @@ svg text { font-family: var(--mono); }
     <svg viewBox="0 0 900 300" role="img" aria-label="Block diagram: battery module feeds the Orange Pi over USB-C; the Pi drives the display over SPI, reads five buttons over GPIO, and reads the camera over USB.">
       <!-- battery -->
       <rect x="30" y="100" width="180" height="100" rx="4" fill="none" stroke="var(--copper)" stroke-width="2"/>
-      <text x="120" y="132" text-anchor="middle" class="svg-part" font-weight="bold">2× 18650 +</text>
-      <text x="120" y="150" text-anchor="middle" class="svg-part" font-weight="bold">power-bank PCB</text>
-      <text x="120" y="176" text-anchor="middle" class="svg-dim">charge + protect + 5 V boost</text>
+      <text x="120" y="132" text-anchor="middle" class="svg-part" font-weight="bold">5 V 18650 pack</text>
+      <text x="120" y="150" text-anchor="middle" class="svg-part" font-weight="bold">+ distribution board</text>
+      <text x="120" y="176" text-anchor="middle" class="svg-dim">USB-C charge in · JST 5 V/3 A out</text>
       <!-- pi -->
       <rect x="330" y="70" width="220" height="160" rx="4" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
       <text x="440" y="130" text-anchor="middle" class="svg-part" font-weight="bold">Orange Pi Zero 2</text>
@@ -317,7 +317,7 @@ svg text { font-family: var(--mono); }
       <!-- arrows -->
       <line x1="210" y1="150" x2="330" y2="150" stroke="var(--w-5v)" stroke-width="2.5"/>
       <polygon points="330,150 320,145 320,155" fill="var(--w-5v)"/>
-      <text x="270" y="140" text-anchor="middle" class="svg-dim">5 V / 2 A → USB-C</text>
+      <text x="270" y="140" text-anchor="middle" class="svg-dim">5 V → header pins 2+4</text>
       <line x1="550" y1="105" x2="680" y2="80" stroke="var(--w-spi)" stroke-width="2.5"/>
       <polygon points="680,80 668,79 671,89" fill="var(--w-spi)"/>
       <text x="615" y="76" text-anchor="middle" class="svg-dim">SPI1 + 3 GPIO</text>
@@ -326,7 +326,7 @@ svg text { font-family: var(--mono); }
       <text x="615" y="160" text-anchor="middle" class="svg-dim">5 GPIO in</text>
       <line x1="680" y1="265" x2="550" y2="215" stroke="var(--copper)" stroke-width="2.5"/>
       <polygon points="550,215 561,214 557,223" fill="var(--copper)"/>
-      <text x="628" y="252" text-anchor="middle" class="svg-dim">USB-A</text>
+      <text x="628" y="252" text-anchor="middle" class="svg-dim">13P USB pins</text>
     </svg>
   </div>
   <p class="caption">FIG 1 — Four modules, three kinds of connection. Only the display and buttons need soldered/Dupont wiring; camera and power are plug-in.</p>
@@ -344,8 +344,7 @@ svg text { font-family: var(--mono); }
         <tr><td class="mono">A2</td><td>3.5″ ST7796U SPI display, 320×480 IPS, capacitive touch (lcdwiki MSP3526) <span class="dim">(touch + FPC unused)</span></td><td class="mono">55.5 × 98 mm PCB, ≈13 mm thick with pins · active area 49.0 × 73.4 mm portrait, mounted landscape</td><td>4× M3 holes in the PCB corners</td></tr>
         <tr><td class="mono">A3</td><td>5× mechanical keyboard switches (MX)</td><td class="mono">15.6 × 15.6 mm body · 11.6 mm above plate + keycap</td><td>14 × 14 mm plate cutout, 1.2–1.5 mm plate</td></tr>
         <tr><td class="mono">A4</td><td>USB UVC board camera, 3.6 mm lens</td><td class="mono">small square PCB, lens barrel ≈ Ø14 mm <span class="dim">(measure yours)</span></td><td>2 screw holes or a printed clamp</td></tr>
-        <tr><td class="mono">A5</td><td>Dual-18650 power bank PCB (5 V/2 A out)</td><td class="mono">PCB varies · each cell Ø18 × 65 mm</td><td>cell holder clips or printed cradle</td></tr>
-        <tr><td class="mono">A6</td><td>2× 18650 Li-Ion cells (parallel)</td><td class="mono">Ø18 × 65 mm each → bay ≈ 40 × 70 × 20 mm</td><td>—</td></tr>
+        <tr><td class="mono">A5</td><td>5 V 18650 battery pack, 2800 mAh (integrated charge + protect + boost; USB-C charge in, JST 2-pin 5 V/3 A out)</td><td class="mono">Ø22 × 67 mm + cable slack → bay ≈ 25 × 75 × 25 mm</td><td>printed cradle or velcro; charge pigtail through side wall</td></tr>
       </tbody>
     </table>
   </div>
@@ -359,8 +358,9 @@ svg text { font-family: var(--mono); }
         <tr><td class="mono">B2</td><td>Hookup wire for the button GND daisy-chain</td><td class="mono">~30 cm</td><td>one ground wire linking all 5 switches</td></tr>
         <tr><td class="mono">B3</td><td>M2.5 screws + standoffs (or heat-set inserts)</td><td class="mono">4 sets</td><td>mount the Orange Pi</td></tr>
         <tr><td class="mono">B4</td><td>M3 screws + standoffs</td><td class="mono">4 sets</td><td>mount the display behind the front panel</td></tr>
-        <tr><td class="mono">B5</td><td>Short right-angle USB-C cable or pigtail</td><td class="mono">1</td><td>battery PCB 5 V out → Pi USB-C, folded inside the case</td></tr>
-        <tr><td class="mono">B6</td><td>Rocker or slide switch, panel-mount</td><td class="mono">1</td><td>master power cut between battery PCB and Pi <span class="dim">(optional but recommended)</span></td></tr>
+        <tr><td class="mono">B5</td><td>JST 2-pin mating pigtail for the pack's output <span class="dim">(measure pitch: 2.0 mm = PH, 2.5 mm = XH)</span></td><td class="mono">1</td><td>battery pack → distribution board</td></tr>
+        <tr><td class="mono">B6</td><td>Rocker or slide switch, panel-mount</td><td class="mono">1</td><td>master power cut on the distribution board's 5 V rail</td></tr>
+        <tr><td class="mono">B11</td><td>Perfboard scrap ≈ 25 × 20 mm (2.54 mm pitch)</td><td class="mono">1</td><td>power distribution board — see §04</td></tr>
         <tr><td class="mono">B7</td><td>Keycaps (1 distinct + 4 matching)</td><td class="mono">5</td><td>shutter should feel different from the UI keys</td></tr>
         <tr><td class="mono">B8</td><td>Hot shoe socket (flash shoe with center contact)</td><td class="mono">1</td><td>flash trigger on the top face — see §04</td></tr>
         <tr><td class="mono">B9</td><td>MOC3021 opto-triac, DIP-6 <span class="dim">(MOC3023 if trigger is unreliable)</span></td><td class="mono">1</td><td>isolates the Pi from the flash sync voltage</td></tr>
@@ -437,7 +437,7 @@ svg text { font-family: var(--mono); }
         <text x="415" y="101">PH5 · unused</text>
         <text x="415" y="138">PH4 · unused</text>
         <text x="415" y="175" font-weight="bold">PC9 — SHUTTER button</text>
-        <text x="415" y="212">GND — button ground rail</text>
+        <text x="415" y="212" font-weight="bold">GND — buttons + power return</text>
         <text x="415" y="249" font-weight="bold">PC6 — DOWN button</text>
         <text x="415" y="286" font-weight="bold">PC5 — UP button</text>
         <text x="415" y="323" font-weight="bold">PC8 — ALBUM button</text>
@@ -449,9 +449,9 @@ svg text { font-family: var(--mono); }
       </g>
       <!-- right labels (even pins) -->
       <g class="pin-label" text-anchor="start" fill="var(--ink)">
-        <text x="525" y="64" font-weight="bold">5 V — display VCC</text>
-        <text x="525" y="101">5 V — spare</text>
-        <text x="525" y="138" font-weight="bold">GND — display GND</text>
+        <text x="525" y="64" font-weight="bold">5 V — power IN (battery)</text>
+        <text x="525" y="101" font-weight="bold">5 V — power IN (battery)</text>
+        <text x="525" y="138" font-weight="bold">GND — power return</text>
         <text x="525" y="175">PH2 · unused</text>
         <text x="525" y="212">PH3 · unused</text>
         <text x="525" y="249" font-weight="bold">PC11 — FLASH trigger (hot shoe)</text>
@@ -623,21 +623,63 @@ svg text { font-family: var(--mono); }
   LED current — below the MOC3021's guaranteed 15 mA trigger (most parts fire anyway). Swap in a
   <strong>MOC3023</strong> (5 mA guaranteed, identical pinout), or drop the resistor to 150 Ω.</div>
 
-  <h3>Power &amp; camera — plug-in, no soldering to the Pi</h3>
+  <h3>Power — header pins via a distribution board (no USB-C cable in the case)</h3>
+  <p>Powering through the header 5 V pins is the officially documented method (user manual
+  §2.8). The battery pack's JST output lands on a small perfboard (B11) that carries the
+  master switch and fans 5 V out to everything:</p>
+  <div class="figure narrow">
+    <svg viewBox="0 0 860 300" role="img" aria-label="Power tree: battery JST output through the master switch onto a 5 volt rail feeding Pi header pins 2 and 4, display VCC and camera; ground rail feeds pins 6 and 9, display and camera grounds.">
+      <text x="430" y="24" text-anchor="middle" class="svg-title">DISTRIBUTION BOARD — ONE INPUT, ONE SWITCH, THREE LOADS</text>
+      <rect x="30" y="110" width="130" height="60" rx="4" fill="none" stroke="var(--copper)" stroke-width="2"/>
+      <text x="95" y="136" text-anchor="middle" class="svg-part" font-weight="bold">battery JST</text>
+      <text x="95" y="156" text-anchor="middle" class="svg-dim">5 V / 3 A max</text>
+      <rect x="205" y="118" width="90" height="44" rx="4" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="250" y="145" text-anchor="middle" class="svg-part" font-weight="bold">switch</text>
+      <line x1="160" y1="132" x2="205" y2="132" stroke="var(--w-5v)" stroke-width="2.5"/>
+      <line x1="295" y1="132" x2="380" y2="132" stroke="var(--w-5v)" stroke-width="2.5"/>
+      <line x1="160" y1="152" x2="380" y2="152" stroke="var(--w-gnd)" stroke-width="2.5"/>
+      <!-- rails -->
+      <line x1="380" y1="60" x2="380" y2="230" stroke="var(--w-5v)" stroke-width="3"/>
+      <line x1="410" y1="60" x2="410" y2="230" stroke="var(--w-gnd)" stroke-width="3"/>
+      <text x="373" y="52" text-anchor="end" class="svg-dim" fill="var(--w-5v)">5 V rail</text>
+      <text x="418" y="52" class="svg-dim">GND rail</text>
+      <!-- loads -->
+      <g stroke="var(--w-5v)" stroke-width="2.5"><line x1="380" y1="80" x2="560" y2="80"/><line x1="380" y1="150" x2="560" y2="150"/><line x1="380" y1="215" x2="560" y2="215"/></g>
+      <g stroke="var(--w-gnd)" stroke-width="2.5"><line x1="410" y1="95" x2="560" y2="95"/><line x1="410" y1="165" x2="560" y2="165"/><line x1="410" y1="230" x2="560" y2="230"/></g>
+      <text x="575" y="84" class="svg-part" font-weight="bold">Pi 26P pins 2 + 4 (5 V ×2)</text>
+      <text x="575" y="99" class="svg-dim">GND → pins 6 + 9 (×2 wires each side)</text>
+      <text x="575" y="154" class="svg-part" font-weight="bold">display VCC (5 V)</text>
+      <text x="575" y="169" class="svg-dim">display GND</text>
+      <text x="575" y="219" class="svg-part" font-weight="bold">camera red (5 V)</text>
+      <text x="575" y="234" class="svg-dim">camera black (GND)</text>
+      <text x="430" y="278" text-anchor="middle" class="svg-dim">no fuse / no reverse protection on this path — double-check +/− before first power-up · 20–22 AWG wire</text>
+    </svg>
+  </div>
+  <p class="caption">FIG 4b — Power tree. The pack's own USB-C charge pigtail mounts through the case wall as the charging port; the Pi's USB-C port stays empty.</p>
+
+  <h3>Camera — soldered to the 13-pin header's USB port</h3>
+  <p>The Zero 2's second header exposes two full USB 2.0 host ports (manual §2.9/§3.17) —
+  the camera solders there and the chassis needs no USB-A opening. <strong>Pin 1 is the end
+  of the 13-pin row nearest the Ethernet jack.</strong></p>
   <div class="tablewrap">
     <table>
-      <thead><tr><th>Connection</th><th>From</th><th>To</th><th>Notes</th></tr></thead>
+      <thead><tr><th>13-pin header</th><th>Signal</th><th>USB cable wire</th></tr></thead>
       <tbody>
-        <tr><td class="mono">POWER</td><td>Battery PCB 5 V output</td><td>Pi USB-C port</td><td>short right-angle cable (B5); put the master switch (B6) in this run — cut the 5 V line, not GND</td></tr>
-        <tr><td class="mono">CELLS</td><td>2× 18650 in parallel</td><td>Battery PCB B+/B−</td><td>parallel = more capacity at 3.7 V; the PCB boosts to 5 V</td></tr>
-        <tr><td class="mono">CHARGE</td><td>Case exterior</td><td>Battery PCB input port</td><td>expose the PCB's own charge port through the case wall</td></tr>
-        <tr><td class="mono">CAMERA</td><td>UVC camera board</td><td>Pi USB-A port</td><td>shows up as <code>/dev/video0</code></td></tr>
+        <tr><td class="mono">1</td><td>5 V</td><td class="mono">red <span class="dim">(or feed from the distribution board)</span></td></tr>
+        <tr><td class="mono">2</td><td>GND</td><td class="mono">black + shield braid (Pi side only)</td></tr>
+        <tr><td class="mono">3</td><td>USB2-DM (D−)</td><td class="mono">white</td></tr>
+        <tr><td class="mono">4</td><td>USB2-DP (D+)</td><td class="mono">green</td></tr>
+        <tr><td class="mono">5 / 6</td><td>USB3-DM / USB3-DP</td><td class="mono">spare second USB port</td></tr>
       </tbody>
     </table>
   </div>
-  <div class="callout"><strong>Battery safety.</strong> Keep the 18650 bay away from the H616 SoC
-  (the warm corner of the Pi), make cell polarity impossible to get wrong (mark it in the plastic),
-  and never bypass the protection PCB. If a cell is dented or the wrapper is torn, replace it.</div>
+  <div class="callout"><strong>USB wiring rules:</strong> keep the white/green pair twisted together
+  and short (&lt;10 cm) — it's a 480 Mbit/s differential pair. Test with <code>lsusb</code> then
+  <code>ls /dev/video*</code>. Pins 7–13 stay free (audio, TV-out, IR, 3 GPIOs).</div>
+  <div class="callout"><strong>Battery safety.</strong> Keep the 18650 pack away from the H616 SoC
+  (the warm corner of the Pi), never bypass its protection electronics, and test whether it
+  charges while powering the camera (pass-through) — cheap packs often shut the output off
+  while charging. Replace the pack if the wrapper is torn or the cell dented.</div>
 </section>
 
 <!-- ============================== 05 PANELS ============================== -->
@@ -654,7 +696,7 @@ svg text { font-family: var(--mono); }
         <tr><td>Top</td><td>1× button hole</td><td class="mono">14 × 14 mm</td><td>SHUTTER — index finger position, like a real camera</td></tr>
         <tr><td>Top</td><td>Hot shoe mount</td><td class="mono">shoe ≈ 21 mm rail width ✱</td><td>screw or bolt the shoe through the top wall; route the two trigger wires inside</td></tr>
         <tr><td>Front (subject side)</td><td>Lens hole</td><td class="mono">Ø 15 mm ✱</td><td>camera lens barrel; chamfer the edge so it doesn't vignette</td></tr>
-        <tr><td>Side</td><td>Charge port slot</td><td class="mono">≈ 10 × 4 mm ✱</td><td>battery PCB's charging connector</td></tr>
+        <tr><td>Side</td><td>Charge port slot</td><td class="mono">≈ 10 × 4 mm ✱</td><td>battery pack's USB-C charge pigtail, glued/clamped through the wall</td></tr>
         <tr><td>Side</td><td>Power switch hole</td><td class="mono">per switch (B6)</td><td>master on/off</td></tr>
         <tr><td>Side or bottom</td><td>Vent slots</td><td class="mono">3–4 slots, 2 × 15 mm</td><td>H616 runs warm; passive airflow is enough</td></tr>
       </tbody>
@@ -726,8 +768,8 @@ svg text { font-family: var(--mono); }
       <text x="415" y="210" text-anchor="middle" class="svg-dim">USB-A + USB-C edges facing the battery bay</text>
       <!-- battery -->
       <rect x="120" y="270" width="380" height="56" fill="none" stroke="var(--copper)" stroke-width="2"/>
-      <text x="310" y="296" text-anchor="middle" class="svg-part" font-weight="bold" fill="var(--copper)">18650 × 2 + power PCB</text>
-      <text x="310" y="315" text-anchor="middle" class="svg-dim">charge port through side wall</text>
+      <text x="310" y="296" text-anchor="middle" class="svg-part" font-weight="bold" fill="var(--copper)">5 V 18650 pack + distro board</text>
+      <text x="310" y="315" text-anchor="middle" class="svg-dim">USB-C charge pigtail through side wall</text>
       <!-- camera -->
       <rect x="640" y="270" width="120" height="56" fill="var(--panel)" stroke="var(--ink)" stroke-width="2"/>
       <text x="700" y="296" text-anchor="middle" class="svg-part" font-weight="bold">camera</text>
@@ -735,9 +777,9 @@ svg text { font-family: var(--mono); }
       <!-- annotations -->
       <text x="415" y="133" text-anchor="middle" class="svg-dim">13 Dupont wires, folded ribbon</text>
       <line x1="580" y1="195" x2="640" y2="290" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <text x="632" y="248" text-anchor="middle" class="svg-dim">USB-A</text>
+      <text x="632" y="248" text-anchor="middle" class="svg-dim">13P USB</text>
       <line x1="250" y1="195" x2="180" y2="280" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>
-      <text x="196" y="240" text-anchor="middle" class="svg-dim">USB-C 5 V</text>
+      <text x="196" y="240" text-anchor="middle" class="svg-dim">5 V → pins 2+4</text>
       <!-- vents -->
       <g stroke="var(--muted)" stroke-width="3">
         <line x1="862" y1="150" x2="862" y2="170"/><line x1="862" y1="185" x2="862" y2="205"/><line x1="862" y1="220" x2="862" y2="240"/>
@@ -776,7 +818,7 @@ svg text { font-family: var(--mono); }
 </section>
 
 <footer>
-  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV D</span>
+  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV E</span>
   <span>full software docs: <span class="mono">HARDWARE.md</span> in the repo</span>
 </footer>
 

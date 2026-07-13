@@ -11,7 +11,7 @@ Parts used:
 | 3.5" SPI TFT, **ST7796U**, 320×480 IPS, capacitive touch (lcdwiki MSP3526; touch unused) | Pimoroni Display HAT Mini (ST7789, 320×240) |
 | 5× mechanical keyboard switches | HAT's 4 buttons + PiSugar shutter button |
 | 3.6mm USB UVC board camera | CSI Spy Camera for Pi Zero |
-| Dual-18650 power bank PCB (5V/2A boost out) | PiSugar 3 |
+| 5V 18650 battery pack, 2800mAh (integrated charge/protect/boost; USB-C in, JST 2-pin 5V/3A out) | PiSugar 3 |
 
 ## 26-pin header pinout (Orange Pi Zero 2)
 
@@ -120,12 +120,50 @@ ls /dev/video*          # should list video0
 
 If it enumerates at a different index, set `CAMERA_DEVICE` in `.env`.
 
+### Camera on the 13-pin header (no USB-A plug needed)
+
+The Zero 2's second header exposes **two full USB 2.0 host ports** (user manual
+§2.9 / §3.17 — the same ports the official expansion board uses). Cutting the
+camera's USB cable and soldering it here frees the chassis from any USB-A cutout.
+**Pin 1 is the end of the 13-pin row nearest the Ethernet jack.**
+
+| 13-pin header | Signal | USB cable wire |
+|---|---|---|
+| 1 | 5V | red |
+| 2 | GND | black (+ shield braid, Pi side only) |
+| 3 | USB2-DM (D−) | white |
+| 4 | USB2-DP (D+) | green |
+| 5 / 6 | USB3-DM / USB3-DP | spare second USB port |
+
+Keep D+/D− twisted together and short (<10 cm if possible) — it's a 480 Mbit/s
+differential pair. Verify with `lsusb` then `ls /dev/video*` after soldering.
+(Pins 7–13 stay free: audio line-out, TV-out, IR and three GPIOs.)
+
 ## Power
 
-The board needs regulated **5V/2A** into its USB-C port. Li-Ion cells are 3.7V no matter
-how many you parallel — parallel adds capacity, not voltage — so use a dual-18650 power
-bank PCB module (charging + protection + 5V/2A boost in one board) and feed its 5V output
-to the USB-C connector. One cell ≈ 2–3h runtime, two in parallel ≈ all-day.
+The board needs regulated **5V/2A**. Instead of the USB-C port, power it through the
+header 5V pins — the officially documented method (user manual §2.8: red wire to a
+5V pin, black to GND; "remember not to connect the wrong pin").
+
+Battery: a **5V 18650 battery pack** with integrated charging, protection and boost
+(USB-C charge input, JST 2-pin 5V/3A output; e.g. NICJOY LI-1S1P-5V2800, 22×67 mm).
+~2 Ah usable at 5V ≈ 2–3h runtime. Wire its JST output to a small perfboard
+"distribution board" that carries the master power switch and fans out:
+
+```
+JST 2-pin ─► [switch] ─► 5V rail ─┬─ 26P pins 2 + 4  (Pi — two wires share the current)
+                                  ├─ display VCC (5V)
+                                  └─ camera red (or 13P pin 1)
+                        GND rail ─┬─ 26P pins 6 + 9
+                                  ├─ display GND
+                                  └─ camera black
+```
+
+Cautions: regulated 5V only; there is **no fuse or reverse-polarity protection** on
+this path — double-check +/− before first power-up; use two 5V + two GND header
+pins and ≥0.5 mm² (20–22 AWG) wire. The pack's USB-C charge pigtail mounts through
+the case wall as the charge port. Test whether the pack does charge-while-output
+(pass-through); cheap packs often power off the output while charging.
 
 ## Legacy 4.9 kernel image (official "Orange Pi Focal" Ubuntu 20.04)
 
