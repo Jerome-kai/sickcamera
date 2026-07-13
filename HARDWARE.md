@@ -9,7 +9,7 @@ Parts used:
 |---|---|
 | Orange Pi Zero 2 | Raspberry Pi Zero 2 W |
 | 3.5" SPI TFT, **ST7796U**, 320×480 IPS, capacitive touch (lcdwiki MSP3526; touch unused) | Pimoroni Display HAT Mini (ST7789, 320×240) |
-| 5× mechanical keyboard switches | HAT's 4 buttons + PiSugar shutter button |
+| 1× mechanical keyboard switch (shutter) + 4× 6×6 mm tactile switches (UI) | HAT's 4 buttons + PiSugar shutter button |
 | 3.6mm USB UVC board camera | CSI Spy Camera for Pi Zero |
 | 5V 18650 battery pack, 2800mAh (integrated charge/protect/boost; USB-C in, JST 2-pin 5V/3A out) | PiSugar 3 |
 
@@ -62,11 +62,20 @@ a control input on this module, so PC15 can drive it. If the backlight misbehave
 (dim, or the board browns out), tie LED to 3.3 V (pin 1) for always-on instead —
 the software copes, `set_backlight` just stops having a visible effect.
 
-## Button wiring (5 mechanical switches)
+## Button wiring (1 MX shutter + 4× 6×6 mm tactile switches)
 
-One leg of each switch to the listed header pin, the other leg to any GND pin
-(6, 9, 14, 20, 25). Internal pull-ups are enabled in software; pressed = line to ground.
-No resistors needed.
+The shutter is a full mechanical keyboard switch (unmistakable by feel); the four UI
+buttons are 6×6 mm through-hole tactile switches, soldered to a small perfboard strip
+mounted behind the front panel on standoffs, stems poking through Ø4 mm holes (pick
+the stem height — 4.3 to 10 mm variants exist — to clear wall + standoff + board).
+
+**4-leg tact switches:** the 4 pins are two internally-joined pairs — wire two
+**diagonal** pins (diagonal is always a valid pair) or beep-test with a multimeter;
+using two joined pins reads as "always pressed".
+
+One contact of each switch to the listed header pin, the other to any GND pin
+(6, 9, 14, 20, 25) — daisy-chain one GND wire across all five. Internal pull-ups are
+enabled in software; pressed = line to ground. No resistors needed.
 
 | Function | Header pin | Line | Notes |
 |---|---|---|---|

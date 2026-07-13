@@ -268,7 +268,7 @@ svg text { font-family: var(--mono); }
 <header class="masthead">
   <div class="doc-id">
     <span>IMAGEGENCAM · ORANGE PI ZERO 2 BUILD</span>
-    <span>REV E · 2026-07</span>
+    <span>REV F · 2026-07</span>
     <span>SHEET 1 / 1</span>
   </div>
   <h1>Enclosure &amp; wiring reference</h1>
@@ -342,7 +342,8 @@ svg text { font-family: var(--mono); }
       <tbody>
         <tr><td class="mono">A1</td><td>Orange Pi Zero 2</td><td class="mono">53 × 60 mm, ~18 mm tall with headers</td><td>4× M2.5 holes in the corners</td></tr>
         <tr><td class="mono">A2</td><td>3.5″ ST7796U SPI display, 320×480 IPS, capacitive touch (lcdwiki MSP3526) <span class="dim">(touch + FPC unused)</span></td><td class="mono">55.5 × 98 mm PCB, ≈13 mm thick with pins · active area 49.0 × 73.4 mm portrait, mounted landscape</td><td>4× M3 holes in the PCB corners</td></tr>
-        <tr><td class="mono">A3</td><td>5× mechanical keyboard switches (MX)</td><td class="mono">15.6 × 15.6 mm body · 11.6 mm above plate + keycap</td><td>14 × 14 mm plate cutout, 1.2–1.5 mm plate</td></tr>
+        <tr><td class="mono">A3</td><td>1× MX mechanical switch — SHUTTER only</td><td class="mono">15.6 × 15.6 mm body · 11.6 mm above plate + keycap</td><td>14 × 14 mm plate cutout, 1.2–1.5 mm plate</td></tr>
+        <tr><td class="mono">A3b</td><td>4× 6×6 mm through-hole tactile switches — UI buttons <span class="dim">(stem heights 4.3–10 mm; pick to clear wall + standoff + board)</span></td><td class="mono">6 × 6 mm body · Ø3.5 mm stem</td><td>soldered to a perfboard strip on standoffs; stems through Ø4 mm holes</td></tr>
         <tr><td class="mono">A4</td><td>USB UVC board camera, 3.6 mm lens</td><td class="mono">small square PCB, lens barrel ≈ Ø14 mm <span class="dim">(measure yours)</span></td><td>2 screw holes or a printed clamp</td></tr>
         <tr><td class="mono">A5</td><td>5 V 18650 battery pack, 2800 mAh (integrated charge + protect + boost; USB-C charge in, JST 2-pin 5 V/3 A out)</td><td class="mono">Ø22 × 67 mm + cable slack → bay ≈ 25 × 75 × 25 mm</td><td>printed cradle or velcro; charge pigtail through side wall</td></tr>
       </tbody>
@@ -561,9 +562,12 @@ svg text { font-family: var(--mono); }
     </svg>
   </div>
   <p class="caption">FIG 3 — Pressed = pin pulled to ground. Internal pull-ups are set by the software; no resistors needed.</p>
-  <p>Each switch is not polarised — either leg can be signal or ground. Solder the signal wire to
-  one leg and daisy-chain the other legs together with a single run of hookup wire ending at
-  header pin 9 (any GND pin works: 6, 9, 14, 20, 25).</p>
+  <p>The shutter is the lone MX switch; the four UI buttons are 6×6 mm tactile switches on a
+  perfboard strip. <strong>4-leg tact switches are two internally-joined pin pairs</strong> — wire
+  two <strong>diagonal</strong> pins (diagonal always spans the contact) or beep-test with a
+  multimeter first; picking two joined pins reads as "always pressed". Solder the signal wire to
+  one contact and daisy-chain the others with a single run of hookup wire ending at header
+  pin 9 (any GND pin works: 6, 9, 14, 20, 25).</p>
 
   <h3>Hot shoe — flash trigger through a MOC3021 opto-triac</h3>
   <div class="figure">
@@ -692,7 +696,7 @@ svg text { font-family: var(--mono); }
       <thead><tr><th>Face</th><th>Cutout</th><th>Size</th><th>For</th></tr></thead>
       <tbody>
         <tr><td>Back (user side)</td><td>Display window</td><td class="mono">75 × 50 mm ✱</td><td>3.5″ active area 73.4 × 49.0 mm (landscape) + clearance; touch glass is 74.0 × 49.6 mm</td></tr>
-        <tr><td>Back</td><td>4× button holes</td><td class="mono">14 × 14 mm each</td><td>UP / DOWN / ALBUM / PROMPT switches snap into 1.2–1.5 mm wall</td></tr>
+        <tr><td>Back</td><td>4× button holes</td><td class="mono">Ø 4 mm each (Ø 8 mm with printed caps)</td><td>UP / DOWN / ALBUM / PROMPT — 6×6 tact stems on a perfboard strip behind the wall</td></tr>
         <tr><td>Top</td><td>1× button hole</td><td class="mono">14 × 14 mm</td><td>SHUTTER — index finger position, like a real camera</td></tr>
         <tr><td>Top</td><td>Hot shoe mount</td><td class="mono">shoe ≈ 21 mm rail width ✱</td><td>screw or bolt the shoe through the top wall; route the two trigger wires inside</td></tr>
         <tr><td>Front (subject side)</td><td>Lens hole</td><td class="mono">Ø 15 mm ✱</td><td>camera lens barrel; chamfer the edge so it doesn't vignette</td></tr>
@@ -739,14 +743,16 @@ svg text { font-family: var(--mono); }
       <text x="348" y="406" text-anchor="middle" class="svg-dim">75 mm</text>
       <line x1="140" y1="105" x2="140" y2="354" stroke="var(--muted)" stroke-width="1"/>
       <text x="132" y="234" text-anchor="end" class="svg-dim">50 mm</text>
-      <text x="775" y="140" class="svg-dim" transform="rotate(90 775 140)">14 × 14 mm · ≥ 5 mm apart</text>
+      <text x="775" y="140" class="svg-dim" transform="rotate(90 775 140)">Ø4 mm stems · perfboard behind</text>
     </svg>
   </div>
   <p class="caption">FIG 5 — Back panel. Camera-style: screen left under the thumbless zone, UI column under the right thumb, shutter on the top edge under the index finger. PROMPT sits below ALBUM (or wherever the column fits your case height).</p>
 
-  <div class="check"><strong>Keycap clearance:</strong> MX switches need ≈ 11.6 mm of free depth
-  behind the plate plus the keycap in front. Leave at least 8 mm between the button column and
-  the display module's PCB edge inside the case.</div>
+  <div class="check"><strong>Depth &amp; height budget:</strong> the MX shutter needs ≈ 11.6 mm behind
+  its plate plus keycap in front. For the tact-switch column, pick stem height so the stem sits
+  1–2 mm proud of the wall: wall + standoff + 1.6 mm board — e.g. 2 mm wall + 5 mm standoff +
+  board ≈ 8.6 mm → use 10 mm stems. Printed Ø8 mm caps in guide holes make them nicer to press
+  and forgive the height math.</div>
 </section>
 
 <!-- ============================== 06 LAYOUT ============================== -->
@@ -818,7 +824,7 @@ svg text { font-family: var(--mono); }
 </section>
 
 <footer>
-  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV E</span>
+  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV F</span>
   <span>full software docs: <span class="mono">HARDWARE.md</span> in the repo</span>
 </footer>
 
