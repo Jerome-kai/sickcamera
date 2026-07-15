@@ -1650,19 +1650,26 @@ class ImageGenCamController:
         draw.text((text_x, text_y), magic_title, font=title_font, fill=(18, 18, 18))
         return screen
 
+    def _pending_jobs_for_badge(self) -> int:
+        with self.state_lock:
+            return max(0, min(9, self.state.pending_jobs))
+
     def _preview_chrome_key(self) -> tuple[object, ...]:
+        pending = self._pending_jobs_for_badge()
         if self.magic_mode_active:
             return (
                 "magic",
                 self._magic_prompt_display_text(),
                 self.magic_prompt_pending,
                 self.current_magic_prompt.title if self.current_magic_prompt else "",
+                pending,
             )
         current_entry = self.prompt_entries[self.prompt_order[self.selected_prompt_index]]
         return (
             "normal",
             current_entry["title"],
             self.ready_unseen_count > 0,
+            pending,
         )
 
     def _build_preview_chrome_overlay(self) -> Image.Image:
@@ -1699,7 +1706,26 @@ class ImageGenCamController:
             text_y = title_box[1] + ((title_box[3] - title_box[1]) - text_h) / 2 - text_box[1]
             draw.text((text_x, text_y), title, font=title_font, fill=(18, 18, 18))
 
+        self._draw_queue_badge(screen)
         return screen
+
+    def _draw_queue_badge(self, screen: Image.Image) -> None:
+        """Small right-edge pill showing how many photos are still generating."""
+        pending = self._pending_jobs_for_badge()
+        if pending <= 0:
+            return
+        draw = ImageDraw.Draw(screen)
+        # Sits under the battery icon's corner on PiSugar builds, top-right otherwise.
+        top = 40 if self.pisugar_enabled else 14
+        badge_font = self._load_font(13)
+        label = str(pending)
+        label_w = draw.textlength(label, font=badge_font)
+        box = (WIDTH - 34 - int(label_w) - 20, top, WIDTH - 12, top + 26)
+        draw.rounded_rectangle(box, radius=13, fill=(18, 18, 18, 208), outline=(255, 255, 255, 232), width=2)
+        # Amber three-quarter arc reads as "working".
+        arc_box = (box[0] + 7, top + 7, box[0] + 19, top + 19)
+        draw.arc(arc_box, start=300, end=210, fill=(255, 193, 7), width=2)
+        draw.text((box[0] + 25, top + 5), label, font=badge_font, fill=(255, 255, 255))
 
     def _get_preview_chrome_overlay(self) -> Image.Image:
         cache_key = self._preview_chrome_key()

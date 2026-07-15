@@ -76,6 +76,25 @@ DEFAULT_PROMPT_ENTRIES = [
             "energetic, lively, and comedic in a fully stylized, non-realistic world."
         ),
     },
+    {
+        "id": "prompt-5",
+        "title": "Graduation Day",
+        "body": (
+            "Transform this photo into a joyful graduation ceremony scene while keeping every "
+            "person clearly recognizable — same faces, same poses, same framing."
+            "\n\nDress the subject(s) in a classic graduation cap (mortarboard with a swinging "
+            "tassel) and flowing gown; if they hold anything, replace or accompany it with a "
+            "rolled diploma tied with a ribbon."
+            "\n\nTransform the background into a celebratory campus commencement: a stage or "
+            "lawn with banners, other gowned graduates softly blurred behind, golden-hour "
+            "sunlight, and confetti plus a few mortarboards frozen mid-air as if just tossed."
+            "\n\nColor palette: warm golds, deep academic blues and maroons, crisp white "
+            "accents. Slightly cinematic lighting, celebratory and proud mood, like the best "
+            "photo from the best day of school."
+            "\n\nAnimals or objects in the photo also graduate: give them tiny caps and "
+            "diplomas. Do not add any readable text, logos, or school names anywhere."
+        ),
+    },
 ]
 DEFAULT_PROMPTS = {
     entry["id"]: entry["body"] for entry in DEFAULT_PROMPT_ENTRIES
