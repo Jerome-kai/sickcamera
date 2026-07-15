@@ -9,10 +9,12 @@ from pathlib import Path
 from imagegencam.web import (
     build_generated_images_zip,
     build_generated_image_list,
+    build_selected_images_zip,
     delete_generated_image_by_relative_path,
     get_capture_image_by_relative_path,
     get_generated_image_by_relative_path,
     get_latest_generated_path,
+    get_or_create_thumbnail,
     json_for_inline_script,
     render_page,
 )
@@ -164,9 +166,51 @@ class LatestGeneratedPathTests(unittest.TestCase):
             html = render_page(controller).decode("utf-8")
 
             self.assertIn("Download All", html)
-            self.assertIn("Download Selected", html)
-            self.assertIn("Delete Selected", html)
+            self.assertIn('id="download-selected-button"', html)
+            self.assertIn('id="delete-selected-button"', html)
+            self.assertIn('id="select-toggle-button"', html)
+            self.assertIn("/download/selected", html)
             self.assertIn("/api/images/delete", html)
+            self.assertIn("thumb_url", html)
+
+    def test_selected_zip_contains_only_requested_images(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            generated_root = project_root / "data" / "generated" / "day"
+            generated_root.mkdir(parents=True, exist_ok=True)
+            for name in ("a.jpg", "b.jpg", "c.jpg"):
+                Image.new("RGB", (8, 8), (200, 100, 50)).save(generated_root / name, "JPEG")
+            controller = _FakeController(project_root)
+
+            body = build_selected_images_zip(controller, ["day/a.jpg", "day/c.jpg", "../evil.jpg"])
+
+            self.assertIsNotNone(body)
+            with zipfile.ZipFile(BytesIO(body)) as archive:
+                self.assertEqual(sorted(archive.namelist()), ["day/a.jpg", "day/c.jpg"])
+            self.assertIsNone(build_selected_images_zip(controller, ["missing.jpg"]))
+
+    def test_thumbnail_created_smaller_and_cached(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            generated_root = project_root / "data" / "generated" / "day"
+            generated_root.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (1024, 768), (10, 120, 200)).save(generated_root / "big.jpg", "JPEG")
+            controller = _FakeController(project_root)
+
+            thumb = get_or_create_thumbnail(controller, "day/big.jpg")
+
+            self.assertIsNotNone(thumb)
+            with Image.open(thumb) as reduced:
+                self.assertLessEqual(max(reduced.size), 360)
+            first_mtime = thumb.stat().st_mtime_ns
+            again = get_or_create_thumbnail(controller, "day/big.jpg")
+            self.assertEqual(again, thumb)
+            self.assertEqual(again.stat().st_mtime_ns, first_mtime)
+            self.assertIsNone(get_or_create_thumbnail(controller, "../escape.jpg"))
 
     def test_about_uses_device_details_not_live_preview(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

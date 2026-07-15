@@ -696,7 +696,7 @@ svg text { font-family: var(--mono); }
       <thead><tr><th>Face</th><th>Cutout</th><th>Size</th><th>For</th></tr></thead>
       <tbody>
         <tr><td>Back (user side)</td><td>Display window</td><td class="mono">75 × 50 mm ✱</td><td>3.5″ active area 73.4 × 49.0 mm (landscape) + clearance; touch glass is 74.0 × 49.6 mm</td></tr>
-        <tr><td>Back</td><td>4× button holes</td><td class="mono">Ø 4 mm each (Ø 8 mm with printed caps)</td><td>UP / DOWN / ALBUM / PROMPT — 6×6 tact stems on a perfboard strip behind the wall</td></tr>
+        <tr><td>Back</td><td>4× button holes, diamond cluster</td><td class="mono">2 large + 2 small cap holes ✱ per your plunger CAD</td><td>UP (top) / DOWN (bottom) large, ALBUM / PROMPT small — printed plungers over 6×6 tacts on a perfboard behind the wall</td></tr>
         <tr><td>Top</td><td>1× button hole</td><td class="mono">14 × 14 mm</td><td>SHUTTER — index finger position, like a real camera</td></tr>
         <tr><td>Top</td><td>Hot shoe mount</td><td class="mono">shoe ≈ 21 mm rail width ✱</td><td>screw or bolt the shoe through the top wall; route the two trigger wires inside</td></tr>
         <tr><td>Front (subject side)</td><td>Lens hole</td><td class="mono">Ø 15 mm ✱</td><td>camera lens barrel; chamfer the edge so it doesn't vignette</td></tr>
@@ -721,32 +721,30 @@ svg text { font-family: var(--mono); }
       <text x="348" y="230" text-anchor="middle" class="svg-part" font-weight="bold">DISPLAY WINDOW</text>
       <text x="348" y="250" text-anchor="middle" class="svg-dim">75 × 50 mm cutout</text>
       <text x="348" y="268" text-anchor="middle" class="svg-dim">module PCB behind (grey outline)</text>
-      <!-- 4 buttons column: 14x14mm -> 74px, spaced -->
+      <!-- diamond button cluster (matches the CAD): big top/bottom, small left/right -->
       <g>
-        <rect x="655" y="90"  width="74" height="74" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
-        <rect x="655" y="180" width="74" height="74" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
-        <rect x="655" y="270" width="74" height="74" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
-        <!-- 4th below -->
+        <circle cx="692" cy="135" r="34" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+        <circle cx="650" cy="228" r="22" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+        <circle cx="734" cy="228" r="22" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+        <circle cx="692" cy="322" r="34" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
       </g>
       <g class="svg-part" text-anchor="middle" font-weight="bold">
-        <text x="692" y="131">UP</text>
-        <text x="692" y="221">DOWN</text>
-        <text x="692" y="311">ALBUM</text>
+        <text x="692" y="140">UP</text>
+        <text x="692" y="327">DOWN</text>
       </g>
-      <rect x="745" y="180" width="0" height="0" fill="none"/>
-      <g>
-        <rect x="655" y="360" width="74" height="40" rx="5" fill="none" stroke="var(--copper)" stroke-width="2" stroke-dasharray="5 4"/>
-        <text x="692" y="385" text-anchor="middle" class="svg-dim" fill="var(--copper)">PROMPT ↓</text>
+      <g class="svg-dim" text-anchor="middle">
+        <text x="650" y="232">ALBM</text>
+        <text x="734" y="232">PRMPT</text>
       </g>
       <!-- dimension marks -->
       <line x1="165" y1="392" x2="531" y2="392" stroke="var(--muted)" stroke-width="1"/>
       <text x="348" y="406" text-anchor="middle" class="svg-dim">75 mm</text>
       <line x1="140" y1="105" x2="140" y2="354" stroke="var(--muted)" stroke-width="1"/>
       <text x="132" y="234" text-anchor="end" class="svg-dim">50 mm</text>
-      <text x="775" y="140" class="svg-dim" transform="rotate(90 775 140)">Ø4 mm stems · perfboard behind</text>
+      <text x="785" y="120" class="svg-dim" transform="rotate(90 785 120)">printed caps over 6×6 tacts on perfboard</text>
     </svg>
   </div>
-  <p class="caption">FIG 5 — Back panel. Camera-style: screen left under the thumbless zone, UI column under the right thumb, shutter on the top edge under the index finger. PROMPT sits below ALBUM (or wherever the column fits your case height).</p>
+  <p class="caption">FIG 5 — Back panel, matching the CAD: screen left, diamond button cluster under the right thumb (large UP/DOWN caps top and bottom, small ALBUM/PROMPT left and right), shutter on the top edge. Set <code>UI_CONTROLS_SIDE=right</code> in .env so the on-screen hint tabs render on the button side.</p>
 
   <div class="check"><strong>Depth &amp; height budget:</strong> the MX shutter needs ≈ 11.6 mm behind
   its plate plus keycap in front. For the tact-switch column, pick stem height so the stem sits

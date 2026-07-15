@@ -948,6 +948,7 @@ def build_generated_image_list(controller) -> list[dict[str, object]]:
                 "filename": candidate.name,
                 "relative_path": relative_path,
                 "image_url": f"/generated/{quote(relative_path)}",
+                "thumb_url": f"/thumbs/{quote(relative_path)}",
                 "download_url": f"/download/generated/{quote(relative_path)}",
                 "modified_unix": stat.st_mtime,
                 "size_bytes": stat.st_size,
@@ -967,6 +968,56 @@ def build_generated_images_zip(controller) -> bytes:
         ):
             archive.write(candidate, candidate.relative_to(generated_root).as_posix())
     return output.getvalue()
+
+
+def build_selected_images_zip(controller, relative_paths: list[str]) -> bytes | None:
+    generated_root = (controller.project_root / "data" / "generated").resolve()
+    resolved: list[Path] = []
+    for relative_path in relative_paths:
+        image_path = get_generated_image_by_relative_path(controller, str(relative_path))
+        if image_path is not None:
+            resolved.append(image_path)
+    if not resolved:
+        return None
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for image_path in resolved:
+            archive.write(image_path, image_path.relative_to(generated_root).as_posix())
+    return output.getvalue()
+
+
+THUMBNAIL_MAX_EDGE = 360
+
+
+def get_or_create_thumbnail(controller, relative_path: str) -> Path | None:
+    """Return a cached small JPEG for the gallery grid, creating it on first use.
+
+    Falls back to the full image path if thumbnailing fails, so the grid always
+    renders something.
+    """
+    image_path = get_generated_image_by_relative_path(controller, relative_path)
+    if image_path is None:
+        return None
+    generated_root = (controller.project_root / "data" / "generated").resolve()
+    thumb_root = controller.project_root / "data" / "thumbnails"
+    thumb_path = (thumb_root / image_path.relative_to(generated_root)).with_suffix(".jpg")
+    try:
+        if thumb_path.is_file() and thumb_path.stat().st_mtime_ns >= image_path.stat().st_mtime_ns:
+            return thumb_path
+    except OSError:
+        pass
+    try:
+        from PIL import Image
+
+        with Image.open(image_path) as source:
+            reduced = source.convert("RGB")
+            reduced.thumbnail((THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE))
+            thumb_path.parent.mkdir(parents=True, exist_ok=True)
+            reduced.save(thumb_path, "JPEG", quality=72)
+    except Exception:
+        logger.exception("Thumbnail generation failed for %s", image_path)
+        return image_path
+    return thumb_path
 
 
 def build_device_details(controller) -> dict[str, object]:
@@ -1204,6 +1255,7 @@ def render_page(controller, message: str = "") -> bytes:
         .image-stage img { width:100%; max-height:58vh; object-fit:contain; display:block; }
         .gallery-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
         .thumb {
+          position:relative;
           aspect-ratio:1;
           padding:0;
           border:1px solid var(--line);
@@ -1213,6 +1265,25 @@ def render_page(controller, message: str = "") -> bytes:
         }
         .thumb.active { border-color:var(--fg); }
         .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+        .thumb .tick {
+          position:absolute;
+          top:6px;
+          right:6px;
+          width:22px;
+          height:22px;
+          border-radius:50%;
+          background:rgba(255,255,255,.92);
+          border:1px solid var(--line);
+          display:grid;
+          place-items:center;
+          font-size:13px;
+          line-height:1;
+          color:transparent;
+        }
+        .thumb.selected { box-shadow:inset 0 0 0 3px var(--fg); border-color:var(--fg); }
+        .thumb.selected .tick { background:var(--fg); color:var(--bg); border-color:var(--fg); }
+        .image-meta { margin:-6px 0 0; color:var(--muted); font-size:13px; line-height:1.4; word-break:break-word; }
+        .image-meta:empty { display:none; }
         .empty { color:var(--muted); padding:40px 16px; text-align:center; }
         .details-grid { border-top:1px solid var(--line); }
         .detail-row {
@@ -1239,13 +1310,13 @@ def render_page(controller, message: str = "") -> bytes:
         <header class="bar">
           <h1 class="brand">ImageGenCam</h1>
           <nav class="nav" aria-label="App sections">
-            <button class="active" type="button" data-tab="prompt">Prompts</button>
-            <button type="button" data-tab="gallery">Gallery</button>
+            <button class="active" type="button" data-tab="gallery">Gallery</button>
+            <button type="button" data-tab="prompt">Prompts</button>
             <button type="button" data-tab="about">About</button>
           </nav>
         </header>
 
-        <section class="panel active" id="panel-prompt">
+        <section class="panel" id="panel-prompt">
           <div class="section-title">
             <h3>Prompts</h3>
             <div class="button-row">
@@ -1256,17 +1327,21 @@ def render_page(controller, message: str = "") -> bytes:
           <div class="prompt-list" id="prompt-list"></div>
         </section>
 
-        <section class="panel" id="panel-gallery">
+        <section class="panel active" id="panel-gallery">
           <div class="section-title">
             <h3>Gallery</h3>
-            <button class="action primary" id="download-all-button" type="button">Download All</button>
+            <div class="button-row">
+              <button class="action" id="select-toggle-button" type="button">Select</button>
+              <button class="action primary" id="download-all-button" type="button">Download All</button>
+            </div>
           </div>
           <p class="status" id="gallery-count">0 images</p>
           <div class="gallery">
             <div class="image-stage" id="image-stage"></div>
+            <p class="image-meta" id="image-meta"></p>
             <div class="button-row gallery-actions">
-              <button class="action" id="download-selected-button" type="button">Download Selected</button>
-              <button class="action" id="delete-selected-button" type="button">Delete Selected</button>
+              <button class="action" id="download-selected-button" type="button">Download</button>
+              <button class="action" id="delete-selected-button" type="button">Delete</button>
             </div>
             <p class="status" id="gallery-status" aria-live="polite"></p>
             <div class="gallery-grid" id="gallery-grid"></div>
@@ -1287,6 +1362,8 @@ def render_page(controller, message: str = "") -> bytes:
         let currentIndex = 0;
         let promptSaveTimer = null;
         let promptSaveGeneration = 0;
+        let selectionMode = false;
+        const selectedPaths = new Set();
 
         const promptList = document.getElementById("prompt-list");
         const promptStatus = document.getElementById("prompt-status");
@@ -1297,7 +1374,23 @@ def render_page(controller, message: str = "") -> bytes:
         const downloadAllButton = document.getElementById("download-all-button");
         const downloadSelectedButton = document.getElementById("download-selected-button");
         const deleteSelectedButton = document.getElementById("delete-selected-button");
+        const selectToggleButton = document.getElementById("select-toggle-button");
+        const imageMeta = document.getElementById("image-meta");
         const deviceDetailsElement = document.getElementById("device-details");
+
+        function formatBytes(bytes) {
+          if (!Number.isFinite(bytes)) return "";
+          if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+          return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+        }
+
+        function formatDate(unixSeconds) {
+          if (!Number.isFinite(unixSeconds)) return "";
+          return new Date(unixSeconds * 1000).toLocaleString([], {
+            dateStyle: "medium",
+            timeStyle: "short",
+          });
+        }
 
         function selectTab(name) {
           document.querySelectorAll(".nav button").forEach((button) => {
@@ -1392,21 +1485,56 @@ def render_page(controller, message: str = "") -> bytes:
         function renderGallery() {
           const image = currentImage();
           const hasImages = images.length > 0;
-          galleryCount.textContent = `${images.length} image${images.length === 1 ? "" : "s"}`;
+          const selectedCount = selectedPaths.size;
+          galleryCount.textContent = selectionMode
+            ? `${selectedCount} of ${images.length} selected`
+            : `${images.length} image${images.length === 1 ? "" : "s"}`;
+          selectToggleButton.disabled = !hasImages;
+          selectToggleButton.textContent = selectionMode ? "Cancel" : "Select";
           downloadAllButton.disabled = !hasImages;
-          downloadSelectedButton.disabled = !image;
-          deleteSelectedButton.disabled = !image;
+          if (selectionMode) {
+            downloadSelectedButton.textContent = `Download (${selectedCount})`;
+            deleteSelectedButton.textContent = `Delete (${selectedCount})`;
+            downloadSelectedButton.disabled = selectedCount === 0;
+            deleteSelectedButton.disabled = selectedCount === 0;
+          } else {
+            downloadSelectedButton.textContent = "Download";
+            deleteSelectedButton.textContent = "Delete";
+            downloadSelectedButton.disabled = !image;
+            deleteSelectedButton.disabled = !image;
+          }
           imageStage.innerHTML = image
             ? `<img src="${image.image_url}" alt="${image.filename}">`
             : '<div class="empty">No generated images yet.</div>';
+          imageMeta.textContent = image
+            ? [image.filename, formatDate(image.modified_unix), formatBytes(image.size_bytes)]
+                .filter(Boolean)
+                .join(" · ")
+            : "";
           galleryGrid.innerHTML = images.length ? "" : '<div class="empty">Take a photo to add one.</div>';
           images.forEach((item, index) => {
             const button = document.createElement("button");
             button.type = "button";
-            button.className = `thumb ${index === currentIndex ? "active" : ""}`;
-            button.innerHTML = `<img src="${item.image_url}" alt="${item.filename}">`;
+            const selected = selectedPaths.has(item.relative_path);
+            button.className = [
+              "thumb",
+              !selectionMode && index === currentIndex ? "active" : "",
+              selected ? "selected" : "",
+            ].filter(Boolean).join(" ");
+            button.innerHTML = `<img src="${item.thumb_url || item.image_url}" alt="${item.filename}" loading="lazy">`;
+            if (selectionMode) {
+              const tick = document.createElement("span");
+              tick.className = "tick";
+              tick.textContent = "✓";
+              button.appendChild(tick);
+            }
             button.addEventListener("click", () => {
-              currentIndex = index;
+              if (selectionMode) {
+                if (selected) selectedPaths.delete(item.relative_path);
+                else selectedPaths.add(item.relative_path);
+              } else {
+                currentIndex = index;
+              }
               renderGallery();
             });
             galleryGrid.appendChild(button);
@@ -1421,6 +1549,57 @@ def render_page(controller, message: str = "") -> bytes:
           images = data.images || [];
           const matchedIndex = images.findIndex((item) => item.filename === previous);
           currentIndex = matchedIndex >= 0 ? matchedIndex : 0;
+          const livePaths = new Set(images.map((item) => item.relative_path));
+          Array.from(selectedPaths).forEach((path) => {
+            if (!livePaths.has(path)) selectedPaths.delete(path);
+          });
+          renderGallery();
+        }
+
+        async function downloadSelectedZip() {
+          const paths = Array.from(selectedPaths);
+          if (!paths.length) return;
+          galleryStatus.textContent = `Zipping ${paths.length} image${paths.length === 1 ? "" : "s"}...`;
+          const response = await fetch("/download/selected", {
+            method: "POST",
+            headers: { "Content-Type": "application/json;charset=UTF-8" },
+            body: JSON.stringify({ relative_paths: paths }),
+          });
+          if (!response.ok) {
+            galleryStatus.textContent = "Download failed.";
+            return;
+          }
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "imagegencam-selected.zip";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          galleryStatus.textContent = "";
+        }
+
+        async function deleteSelectedImages() {
+          const paths = Array.from(selectedPaths);
+          if (!paths.length) return;
+          if (!confirm(`Delete ${paths.length} photo${paths.length === 1 ? "" : "s"}?`)) return;
+          galleryStatus.textContent = "Deleting...";
+          for (const relativePath of paths) {
+            const response = await fetch("/api/images/delete", {
+              method: "POST",
+              headers: { "Content-Type": "application/json;charset=UTF-8" },
+              body: JSON.stringify({ relative_path: relativePath }),
+            });
+            if (response.ok) {
+              const data = await response.json();
+              images = data.images || images;
+            }
+            selectedPaths.delete(relativePath);
+          }
+          currentIndex = Math.min(currentIndex, Math.max(0, images.length - 1));
+          galleryStatus.textContent = "Deleted.";
           renderGallery();
         }
 
@@ -1515,14 +1694,27 @@ def render_page(controller, message: str = "") -> bytes:
           schedulePromptSave();
         });
         downloadAllButton.addEventListener("click", downloadAllImages);
-        downloadSelectedButton.addEventListener("click", downloadCurrentImage);
-        deleteSelectedButton.addEventListener("click", () => deleteCurrentImage().catch(() => {
-          galleryStatus.textContent = "Delete failed.";
-        }));
+        selectToggleButton.addEventListener("click", () => {
+          selectionMode = !selectionMode;
+          if (!selectionMode) selectedPaths.clear();
+          renderGallery();
+        });
+        downloadSelectedButton.addEventListener("click", () => {
+          const task = selectionMode ? downloadSelectedZip() : Promise.resolve(downloadCurrentImage());
+          task.catch(() => {
+            galleryStatus.textContent = "Download failed.";
+          });
+        });
+        deleteSelectedButton.addEventListener("click", () => {
+          const task = selectionMode ? deleteSelectedImages() : deleteCurrentImage();
+          task.catch(() => {
+            galleryStatus.textContent = "Delete failed.";
+          });
+        });
 
         const initialTab = ["prompt", "gallery", "about"].includes(location.hash.slice(1))
           ? location.hash.slice(1)
-          : "prompt";
+          : "gallery";
         renderPrompts();
         renderGallery();
         renderDeviceDetails();
@@ -1849,6 +2041,23 @@ def build_handler(controller):
                     return
                 self._serve_image_path(image_path)
                 return
+            if request_path.startswith("/thumbs/"):
+                relative_path = request_path[len("/thumbs/") :]
+                thumb_path = get_or_create_thumbnail(controller, relative_path)
+                if thumb_path is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
+                    return
+                body = thumb_path.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             if request_path.startswith("/captures/"):
                 relative_path = request_path[len("/captures/") :]
                 image_path = get_capture_image_by_relative_path(controller, relative_path)
@@ -1950,6 +2159,27 @@ def build_handler(controller):
             self.wfile.write(body)
 
         def do_POST(self) -> None:
+            if self.path == "/download/selected":
+                payload = self._read_json_body() or {}
+                raw_paths = payload.get("relative_paths")
+                relative_paths = [str(item) for item in raw_paths] if isinstance(raw_paths, list) else []
+                body = build_selected_images_zip(controller, relative_paths)
+                if body is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "No matching images")
+                    return
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header(
+                    "Content-Disposition", 'attachment; filename="imagegencam-selected.zip"'
+                )
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             if self.path == "/settings/profile":
                 payload = self._read_json_body()
                 if payload is None:

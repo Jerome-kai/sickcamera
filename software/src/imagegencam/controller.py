@@ -1535,6 +1535,22 @@ class ImageGenCamController:
             draw.polygon(points, fill=color)
             return
 
+    def _resolve_tab_side(self, side: str) -> str:
+        """Map logical tab sides to the physical side the buttons live on.
+
+        Call sites use "left" for the controls side (the original HAT has its
+        buttons left of the panel). UI_CONTROLS_SIDE=right mirrors every tab
+        for chassis designs with the button cluster right of the screen.
+        """
+        controls = getattr(self, "_ui_controls_side", None)
+        if controls is None:
+            controls = os.environ.get("UI_CONTROLS_SIDE", "left").strip().lower()
+            controls = controls if controls in {"left", "right"} else "left"
+            self._ui_controls_side = controls
+        if controls == "right":
+            return "right" if side == "left" else "left"
+        return side
+
     def _draw_side_tab(
         self,
         image: Image.Image,
@@ -1545,6 +1561,7 @@ class ImageGenCamController:
         side: str = "left",
         active: bool = False,
     ) -> Image.Image:
+        side = self._resolve_tab_side(side)
         font = self._load_font(12)
         probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
         width = 42 if icon and not label else max(60, min(90, int(probe.textlength(label or "", font=font)) + 18))
@@ -1683,7 +1700,8 @@ class ImageGenCamController:
             screen = self._draw_side_tab(screen, icon="album", y=SIDE_CONTROL_BOTTOM_Y, side="left")
             draw = ImageDraw.Draw(screen)
             if self.ready_unseen_count > 0:
-                self._draw_sparkle_icon(draw, 42, SIDE_CONTROL_BOTTOM_Y + 8, color=(255, 238, 130), radius=6)
+                sparkle_x = 42 if self._resolve_tab_side("left") == "left" else WIDTH - 42
+                self._draw_sparkle_icon(draw, sparkle_x, SIDE_CONTROL_BOTTOM_Y + 8, color=(255, 238, 130), radius=6)
 
             current_entry = self.prompt_entries[self.prompt_order[self.selected_prompt_index]]
             title = self._truncate_text_pixels(
