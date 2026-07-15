@@ -123,6 +123,22 @@ class LatestGeneratedPathTests(unittest.TestCase):
             self.assertFalse(image_path.exists())
             self.assertFalse(metadata_path.exists())
 
+    def test_delete_generated_image_removes_cached_thumbnail(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            generated_root = project_root / "data" / "generated" / "day"
+            generated_root.mkdir(parents=True, exist_ok=True)
+            Image.new("RGB", (800, 600), (90, 90, 90)).save(generated_root / "shot.jpg", "JPEG")
+            controller = _FakeController(project_root)
+
+            thumb = get_or_create_thumbnail(controller, "day/shot.jpg")
+            self.assertTrue(thumb.is_file())
+
+            self.assertTrue(delete_generated_image_by_relative_path(controller, "day/shot.jpg"))
+            self.assertFalse(thumb.exists())
+
     def test_generated_image_lookup_rejects_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp)
@@ -171,6 +187,7 @@ class LatestGeneratedPathTests(unittest.TestCase):
             self.assertIn('id="select-toggle-button"', html)
             self.assertIn("/download/selected", html)
             self.assertIn("/api/images/delete", html)
+            self.assertIn("relative_paths: paths", html)
             self.assertIn("thumb_url", html)
 
     def test_selected_zip_contains_only_requested_images(self) -> None:
@@ -211,6 +228,40 @@ class LatestGeneratedPathTests(unittest.TestCase):
             self.assertEqual(again, thumb)
             self.assertEqual(again.stat().st_mtime_ns, first_mtime)
             self.assertIsNone(get_or_create_thumbnail(controller, "../escape.jpg"))
+
+    def test_batch_delete_endpoint_removes_all_requested_images(self) -> None:
+        import json
+        import urllib.request
+
+        from imagegencam.web import WebServerThread
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp)
+            generated_root = project_root / "data" / "generated" / "day"
+            generated_root.mkdir(parents=True, exist_ok=True)
+            for name in ("a.jpg", "b.jpg", "c.jpg"):
+                (generated_root / name).write_bytes(b"img")
+            controller = _FakeController(project_root)
+
+            server = WebServerThread(controller, "127.0.0.1", 0)
+            server.start()
+            try:
+                port = server.server.server_address[1]
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/images/delete",
+                    data=json.dumps({"relative_paths": ["day/a.jpg", "day/c.jpg"]}).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    payload = json.loads(response.read())
+            finally:
+                server.stop()
+
+            self.assertEqual(payload["deleted"], 2)
+            self.assertEqual([item["filename"] for item in payload["images"]], ["b.jpg"])
+            self.assertFalse((generated_root / "a.jpg").exists())
+            self.assertTrue((generated_root / "b.jpg").exists())
 
     def test_about_uses_device_details_not_live_preview(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

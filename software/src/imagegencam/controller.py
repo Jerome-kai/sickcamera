@@ -1839,6 +1839,16 @@ class ImageGenCamController:
         except OSError:
             logger.warning("Failed to delete generated image metadata %s", metadata_path)
 
+        thumb_path = (
+            self.project_root / "data" / "thumbnails" / image_path.relative_to(self.generated_root.resolve())
+        ).with_suffix(".jpg")
+        try:
+            thumb_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("Failed to delete cached thumbnail %s", thumb_path)
+
         self.gallery_paths = [path for path in self.gallery_paths if path != image_path]
         if self.album_cached_path == image_path:
             self._invalidate_album_cache()

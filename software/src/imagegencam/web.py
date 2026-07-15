@@ -1007,10 +1007,10 @@ def get_or_create_thumbnail(controller, relative_path: str) -> Path | None:
     except OSError:
         pass
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
 
         with Image.open(image_path) as source:
-            reduced = source.convert("RGB")
+            reduced = ImageOps.exif_transpose(source).convert("RGB")
             reduced.thumbnail((THUMBNAIL_MAX_EDGE, THUMBNAIL_MAX_EDGE))
             thumb_path.parent.mkdir(parents=True, exist_ok=True)
             reduced.save(thumb_path, "JPEG", quality=72)
@@ -1064,7 +1064,23 @@ def delete_generated_image_by_relative_path(controller, relative_path: str) -> b
         pass
     except OSError:
         logger.warning("Failed to delete generated image metadata %s", metadata_path)
+    _delete_cached_thumbnail(controller, image_path)
     return True
+
+
+def _delete_cached_thumbnail(controller, image_path: Path) -> None:
+    generated_root = (controller.project_root / "data" / "generated").resolve()
+    try:
+        relative = image_path.relative_to(generated_root)
+    except ValueError:
+        return
+    thumb_path = (controller.project_root / "data" / "thumbnails" / relative).with_suffix(".jpg")
+    try:
+        thumb_path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Failed to delete cached thumbnail %s", thumb_path)
 
 
 def is_capture_image_file(path: Path) -> bool:
@@ -1586,20 +1602,20 @@ def render_page(controller, message: str = "") -> bytes:
           if (!paths.length) return;
           if (!confirm(`Delete ${paths.length} photo${paths.length === 1 ? "" : "s"}?`)) return;
           galleryStatus.textContent = "Deleting...";
-          for (const relativePath of paths) {
-            const response = await fetch("/api/images/delete", {
-              method: "POST",
-              headers: { "Content-Type": "application/json;charset=UTF-8" },
-              body: JSON.stringify({ relative_path: relativePath }),
-            });
-            if (response.ok) {
-              const data = await response.json();
-              images = data.images || images;
-            }
-            selectedPaths.delete(relativePath);
+          const response = await fetch("/api/images/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json;charset=UTF-8" },
+            body: JSON.stringify({ relative_paths: paths }),
+          });
+          if (!response.ok) {
+            galleryStatus.textContent = "Delete failed.";
+            return;
           }
+          const data = await response.json();
+          images = data.images || images;
+          paths.forEach((relativePath) => selectedPaths.delete(relativePath));
           currentIndex = Math.min(currentIndex, Math.max(0, images.length - 1));
-          galleryStatus.textContent = "Deleted.";
+          galleryStatus.textContent = `Deleted ${data.deleted || paths.length}.`;
           renderGallery();
         }
 
@@ -2215,14 +2231,26 @@ def build_handler(controller):
                 payload = self._read_json_body()
                 if payload is None:
                     return
-                relative_path = str(payload.get("relative_path") or "").strip()
-                if not relative_path:
-                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing relative_path")
+                raw_paths = payload.get("relative_paths")
+                if isinstance(raw_paths, list):
+                    relative_paths = [str(path).strip() for path in raw_paths if str(path).strip()]
+                else:
+                    single = str(payload.get("relative_path") or "").strip()
+                    relative_paths = [single] if single else []
+                if not relative_paths:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing relative_path(s)")
                     return
-                if not delete_generated_image_by_relative_path(controller, relative_path):
+                deleted = sum(
+                    1
+                    for relative_path in relative_paths
+                    if delete_generated_image_by_relative_path(controller, relative_path)
+                )
+                if deleted == 0:
                     self.send_error(HTTPStatus.NOT_FOUND, "Generated image not found")
                     return
-                self._send_json({"ok": True, "images": build_generated_image_list(controller)})
+                self._send_json(
+                    {"ok": True, "deleted": deleted, "images": build_generated_image_list(controller)}
+                )
                 return
             if self.path == "/api/recreate-vertical":
                 payload = self._read_json_body()

@@ -250,9 +250,12 @@ removes all three caveats, if you ever feel like it.
 
 1. **Display first**: `.venv/bin/python3 scripts/display_test.py` — color bars + corner
    labels. Fix orientation/colors via `.env` before anything else.
-2. **Buttons**: `gpiomon -c gpiochip0 73 70 69 72 78` (or just run the app) and press each
-   switch — you should see edges.
+2. **Buttons**: `sudo .venv/bin/python3 scripts/button_test.py` — prints DOWN/up per
+   named button as you press each switch. (`gpiomon -c gpiochip0 73 70 69 72 78` works
+   too, but only shows raw line numbers.)
 3. **Camera**: `ls /dev/video*`; the app's preview is the real test.
+3b. **Hot shoe** (if wired): `sudo .venv/bin/python3 scripts/hotshoe_test.py` — pulses
+   the trigger 5×; a mounted flash should pop each time.
 4. **Full app from SSH**: `./scripts/run.sh` — live preview on the panel, buttons, shutter.
 5. **Generation**: with `OPENAI_API_KEY` (+ `OPENAI_BASE_URL` for a gateway) set, take a
    photo and watch the queue. Verify the API path before the hardware arrives with

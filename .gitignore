@@ -18,3 +18,4 @@ software/data/generated/*
 !software/data/generated/.gitkeep
 software/data/queue/*
 !software/data/queue/.gitkeep
+software/data/thumbnails/
