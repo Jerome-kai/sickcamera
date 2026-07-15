@@ -31,6 +31,7 @@ import qrcode
 from .config import MagicHistoryStore, PromptStore, SettingsStore
 from .job_store import PersistentJobStore
 from .openai_client import OpenAIImageEditor, OpenAIImageError, OpenAIMagicPromptPlanner
+from .web import delete_cached_thumbnail
 from .wifi_manager import NetworkManagerWifi, WifiNetwork, WifiRollback
 
 
@@ -1819,7 +1820,7 @@ class ImageGenCamController:
         decoded_relative = unquote(relative_path).lstrip("/")
         image_path = (self.generated_root / decoded_relative).resolve()
         try:
-            image_path.relative_to(self.generated_root.resolve())
+            relative = image_path.relative_to(self.generated_root.resolve())
         except ValueError:
             return False
         if not self._is_generated_image_file(image_path):
@@ -1839,15 +1840,7 @@ class ImageGenCamController:
         except OSError:
             logger.warning("Failed to delete generated image metadata %s", metadata_path)
 
-        thumb_path = (
-            self.project_root / "data" / "thumbnails" / image_path.relative_to(self.generated_root.resolve())
-        ).with_suffix(".jpg")
-        try:
-            thumb_path.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError:
-            logger.warning("Failed to delete cached thumbnail %s", thumb_path)
+        delete_cached_thumbnail(self.project_root, relative)
 
         self.gallery_paths = [path for path in self.gallery_paths if path != image_path]
         if self.album_cached_path == image_path:

@@ -249,7 +249,9 @@ class LatestGeneratedPathTests(unittest.TestCase):
                 port = server.server.server_address[1]
                 request = urllib.request.Request(
                     f"http://127.0.0.1:{port}/api/images/delete",
-                    data=json.dumps({"relative_paths": ["day/a.jpg", "day/c.jpg"]}).encode(),
+                    data=json.dumps(
+                        {"relative_paths": ["day/a.jpg", "day/c.jpg", "day/missing.jpg"]}
+                    ).encode(),
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
@@ -259,6 +261,8 @@ class LatestGeneratedPathTests(unittest.TestCase):
                 server.stop()
 
             self.assertEqual(payload["deleted"], 2)
+            self.assertEqual(payload["failed"], ["day/missing.jpg"])
+            self.assertFalse(payload["ok"])
             self.assertEqual([item["filename"] for item in payload["images"]], ["b.jpg"])
             self.assertFalse((generated_root / "a.jpg").exists())
             self.assertTrue((generated_root / "b.jpg").exists())

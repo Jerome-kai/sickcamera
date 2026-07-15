@@ -13,7 +13,6 @@ never fires is on the wrong line or has a cold joint. Ctrl+C exits.
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -22,19 +21,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from imagegencam import sunxi_gpio  # noqa: E402
-
-
-def _env_int(name: str, default: int) -> int:
-    return int(os.environ.get(name, str(default)))
+from imagegencam.opi_hw import DisplayHATMini  # noqa: E402
 
 
 def main() -> int:
     buttons = {
-        "SHUTTER (MX)": _env_int("BUTTON_SHUTTER_PIN", 73),
-        "UP (big top)": _env_int("BUTTON_UI_UP_PIN", 69),
-        "DOWN (big bottom)": _env_int("BUTTON_UI_DOWN_PIN", 70),
-        "ALBUM (small left)": _env_int("BUTTON_UI_ALBUM_PIN", 72),
-        "PROMPT (small right)": _env_int("BUTTON_UI_PROMPT_PIN", 78),
+        "SHUTTER (MX)": DisplayHATMini.BUTTON_SHUTTER,
+        "UP (big top)": DisplayHATMini.BUTTON_B,
+        "DOWN (big bottom)": DisplayHATMini.BUTTON_A,
+        "ALBUM (small left)": DisplayHATMini.BUTTON_X,
+        "PROMPT (small right)": DisplayHATMini.BUTTON_Y,
     }
     lines = sunxi_gpio.request_inputs(list(buttons.values()), consumer="button-test", pull_up=True)
     print("Watching buttons (active-low). Press each one; Ctrl+C exits.")

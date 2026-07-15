@@ -989,6 +989,21 @@ def build_selected_images_zip(controller, relative_paths: list[str]) -> bytes | 
 THUMBNAIL_MAX_EDGE = 360
 
 
+def thumbnail_path(project_root: Path, relative: Path) -> Path:
+    """Cache location for the gallery thumbnail of data/generated/<relative>."""
+    return (project_root / "data" / "thumbnails" / relative).with_suffix(".jpg")
+
+
+def delete_cached_thumbnail(project_root: Path, relative: Path) -> None:
+    thumb = thumbnail_path(project_root, relative)
+    try:
+        thumb.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Failed to delete cached thumbnail %s", thumb)
+
+
 def get_or_create_thumbnail(controller, relative_path: str) -> Path | None:
     """Return a cached small JPEG for the gallery grid, creating it on first use.
 
@@ -999,8 +1014,7 @@ def get_or_create_thumbnail(controller, relative_path: str) -> Path | None:
     if image_path is None:
         return None
     generated_root = (controller.project_root / "data" / "generated").resolve()
-    thumb_root = controller.project_root / "data" / "thumbnails"
-    thumb_path = (thumb_root / image_path.relative_to(generated_root)).with_suffix(".jpg")
+    thumb_path = thumbnail_path(controller.project_root, image_path.relative_to(generated_root))
     try:
         if thumb_path.is_file() and thumb_path.stat().st_mtime_ns >= image_path.stat().st_mtime_ns:
             return thumb_path
@@ -1064,23 +1078,9 @@ def delete_generated_image_by_relative_path(controller, relative_path: str) -> b
         pass
     except OSError:
         logger.warning("Failed to delete generated image metadata %s", metadata_path)
-    _delete_cached_thumbnail(controller, image_path)
-    return True
-
-
-def _delete_cached_thumbnail(controller, image_path: Path) -> None:
     generated_root = (controller.project_root / "data" / "generated").resolve()
-    try:
-        relative = image_path.relative_to(generated_root)
-    except ValueError:
-        return
-    thumb_path = (controller.project_root / "data" / "thumbnails" / relative).with_suffix(".jpg")
-    try:
-        thumb_path.unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        logger.warning("Failed to delete cached thumbnail %s", thumb_path)
+    delete_cached_thumbnail(controller.project_root, image_path.relative_to(generated_root))
+    return True
 
 
 def is_capture_image_file(path: Path) -> bool:
@@ -1613,9 +1613,19 @@ def render_page(controller, message: str = "") -> bytes:
           }
           const data = await response.json();
           images = data.images || images;
-          paths.forEach((relativePath) => selectedPaths.delete(relativePath));
+          // A "failed" path that is gone from the refreshed list was already
+          // deleted elsewhere (stale grid) — only count ones still on disk.
+          const livePaths = new Set(images.map((item) => item.relative_path));
+          const stillPresent = new Set((data.failed || []).filter((p) => livePaths.has(p)));
+          paths.forEach((relativePath) => {
+            if (!stillPresent.has(relativePath)) selectedPaths.delete(relativePath);
+          });
           currentIndex = Math.min(currentIndex, Math.max(0, images.length - 1));
-          galleryStatus.textContent = `Deleted ${data.deleted || paths.length}.`;
+          galleryStatus.textContent = stillPresent.size
+            ? `Deleted ${data.deleted}. ${stillPresent.size} could not be deleted.`
+            : data.deleted
+              ? `Deleted ${data.deleted}.`
+              : "Already deleted.";
           renderGallery();
         }
 
@@ -2234,23 +2244,31 @@ def build_handler(controller):
                 raw_paths = payload.get("relative_paths")
                 if isinstance(raw_paths, list):
                     relative_paths = [str(path).strip() for path in raw_paths if str(path).strip()]
-                else:
-                    single = str(payload.get("relative_path") or "").strip()
-                    relative_paths = [single] if single else []
-                if not relative_paths:
-                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing relative_path(s)")
+                    if not relative_paths:
+                        self.send_error(HTTPStatus.BAD_REQUEST, "Missing relative_paths")
+                        return
+                    failed = [
+                        relative_path
+                        for relative_path in relative_paths
+                        if not delete_generated_image_by_relative_path(controller, relative_path)
+                    ]
+                    self._send_json(
+                        {
+                            "ok": not failed,
+                            "deleted": len(relative_paths) - len(failed),
+                            "failed": failed,
+                            "images": build_generated_image_list(controller),
+                        }
+                    )
                     return
-                deleted = sum(
-                    1
-                    for relative_path in relative_paths
-                    if delete_generated_image_by_relative_path(controller, relative_path)
-                )
-                if deleted == 0:
+                relative_path = str(payload.get("relative_path") or "").strip()
+                if not relative_path:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing relative_path")
+                    return
+                if not delete_generated_image_by_relative_path(controller, relative_path):
                     self.send_error(HTTPStatus.NOT_FOUND, "Generated image not found")
                     return
-                self._send_json(
-                    {"ok": True, "deleted": deleted, "images": build_generated_image_list(controller)}
-                )
+                self._send_json({"ok": True, "images": build_generated_image_list(controller)})
                 return
             if self.path == "/api/recreate-vertical":
                 payload = self._read_json_body()
