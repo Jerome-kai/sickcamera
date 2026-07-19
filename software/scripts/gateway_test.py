@@ -61,7 +61,10 @@ def main() -> int:
 
     model = os.environ.get("IMAGE_GEN_MODEL", "gpt-image-2")
     api_mode = os.environ.get("IMAGE_GEN_API", "edits").strip().lower()
-    endpoint_name = "chat.completions" if api_mode == "chat" else "images.edit"
+    endpoint_name = {
+        "chat": "chat.completions",
+        "generations": "images/generations",
+    }.get(api_mode, "images.edit")
     print(f"\n[1/2] {endpoint_name} (IMAGE_GEN_API={api_mode}) via model {model} (may take ~30-90s)...")
     try:
         editor = OpenAIImageEditor(
@@ -86,14 +89,16 @@ def main() -> int:
         print("\n[2/2] Magic mode disabled (MAGIC_MODE_ENABLED=0) — skipping /v1/responses test.")
     else:
         magic_model = os.environ.get("MAGIC_MODE_MODEL", "gpt-4.1-mini")
-        print(f"\n[2/2] responses.create via model {magic_model}...")
+        magic_mode = os.environ.get("MAGIC_MODE_API", "responses").strip().lower()
+        magic_endpoint = "chat.completions" if magic_mode == "chat" else "responses.create"
+        print(f"\n[2/2] {magic_endpoint} (MAGIC_MODE_API={magic_mode}) via model {magic_model}...")
         try:
             planner = OpenAIMagicPromptPlanner(model=magic_model)
             plan = planner.create_magic_prompt(source)
             print(f"PASS: magic prompt -> {plan}")
         except Exception:
             failures += 1
-            print("FAIL: responses.create did not work. Full error:")
+            print(f"FAIL: {magic_endpoint} did not work. Full error:")
             traceback.print_exc()
 
     print()
@@ -103,6 +108,8 @@ def main() -> int:
         print("Gateways without /v1/images/edits (e.g. Vercel AI Gateway) need:")
         print("  IMAGE_GEN_API=chat")
         print("  IMAGE_GEN_MODEL=google/gemini-2.5-flash-image  (or another image-capable model)")
+        print("Chinese providers (e.g. SiliconFlow) need the china recipe — see .env.example:")
+        print("  IMAGE_GEN_API=generations + MAGIC_MODE_API=chat")
         return 1
     print("All good — the API path is fully working. The camera will work once wired up.")
     return 0

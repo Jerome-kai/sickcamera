@@ -10,7 +10,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from imagegencam.openai_client import OpenAIImageEditor, OpenAIImageError
+from imagegencam.openai_client import (
+    OpenAIImageEditor,
+    OpenAIImageError,
+    OpenAIMagicPromptPlanner,
+)
 
 
 class _FakeOpenAI:
@@ -68,6 +72,8 @@ class OpenAIImageEditorTests(unittest.TestCase):
     def test_api_mode_from_env_and_invalid_falls_back_to_edits(self) -> None:
         with mock.patch.dict(os.environ, {"IMAGE_GEN_API": "chat"}):
             self.assertEqual(OpenAIImageEditor().api_mode, "chat")
+        with mock.patch.dict(os.environ, {"IMAGE_GEN_API": "generations"}):
+            self.assertEqual(OpenAIImageEditor().api_mode, "generations")
         with mock.patch.dict(os.environ, {"IMAGE_GEN_API": "nonsense"}):
             self.assertEqual(OpenAIImageEditor().api_mode, "edits")
         self.assertEqual(OpenAIImageEditor(api_mode="chat").api_mode, "chat")
@@ -159,6 +165,109 @@ class ChatModeEditTests(unittest.TestCase):
         response = {"choices": [{"message": {"role": "assistant", "content": "sorry, no"}}]}
         with self.assertRaises(OpenAIImageError):
             self._run_edit(_dict_to_namespace(response))
+
+
+class GenerationsModeEditTests(unittest.TestCase):
+    def _run_edit(self, response_payload, downloaded=None) -> tuple[Path, dict]:
+        editor = OpenAIImageEditor(model="Qwen/Qwen-Image-Edit-2509", api_mode="generations")
+        tmp = Path(tempfile.mkdtemp())
+        source = tmp / "source.jpg"
+        source.write_bytes(_png_bytes())
+        output = tmp / "result.jpg"
+        captured: dict = {}
+
+        class _FakeResponse:
+            def __init__(self, body: bytes) -> None:
+                self._body = body
+
+            def read(self) -> bytes:
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc) -> None:
+                return None
+
+        def fake_urlopen(request, timeout=None):
+            if isinstance(request, str):
+                captured["download_url"] = request
+                return _FakeResponse(downloaded or b"")
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.headers)
+            captured["payload"] = __import__("json").loads(request.data)
+            return _FakeResponse(__import__("json").dumps(response_payload).encode())
+
+        env = {"OPENAI_API_KEY": "sf-key", "OPENAI_BASE_URL": "https://api.siliconflow.cn/v1"}
+        with mock.patch.dict(os.environ, env):
+            with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                editor.edit_image(source_path=source, prompt="test", output_path=output)
+        return output, captured
+
+    def test_generations_mode_posts_image_and_downloads_result_url(self) -> None:
+        payload = {"images": [{"url": "https://cdn.example/result.png"}]}
+        output, captured = self._run_edit(payload, downloaded=_png_bytes())
+
+        self.assertEqual(captured["url"], "https://api.siliconflow.cn/v1/images/generations")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer sf-key")
+        self.assertEqual(captured["payload"]["model"], "Qwen/Qwen-Image-Edit-2509")
+        self.assertIn("test", captured["payload"]["prompt"])
+        self.assertTrue(captured["payload"]["image"].startswith("data:image/"))
+        self.assertEqual(captured["download_url"], "https://cdn.example/result.png")
+        self.assertTrue(output.exists())
+        self.assertGreater(output.stat().st_size, 0)
+
+    def test_generations_mode_accepts_openai_style_b64_data(self) -> None:
+        payload = {"data": [{"b64_json": base64.b64encode(_png_bytes()).decode("ascii")}]}
+        output, _ = self._run_edit(payload)
+        self.assertTrue(output.exists())
+
+    def test_generations_mode_raises_when_no_image(self) -> None:
+        with self.assertRaises(OpenAIImageError):
+            self._run_edit({"images": []})
+
+
+class MagicChatModeTests(unittest.TestCase):
+    def _run_plan(self, content: str) -> tuple[dict, _FakeChatCompletions]:
+        planner = OpenAIMagicPromptPlanner(model="Qwen/Qwen2.5-VL-32B-Instruct", api_mode="chat")
+        response = _dict_to_namespace(
+            {"choices": [{"message": {"role": "assistant", "content": content}}]}
+        )
+        completions = _FakeChatCompletions(response)
+        planner._client = types.SimpleNamespace(
+            chat=types.SimpleNamespace(completions=completions)
+        )
+        planner._client_config = ("key", None)
+        tmp = Path(tempfile.mkdtemp())
+        reference = tmp / "ref.jpg"
+        reference.write_bytes(_png_bytes())
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "key", "OPENAI_BASE_URL": ""}):
+            plan = planner.create_magic_prompt(reference)
+        return plan, completions
+
+    def test_chat_mode_sends_image_and_parses_json(self) -> None:
+        plan, completions = self._run_plan('{"title": "Tiny Hat", "prompt": "Add a tiny hat."}')
+
+        self.assertEqual(plan, {"title": "Tiny Hat", "prompt": "Add a tiny hat."})
+        content = completions.captured_kwargs["messages"][0]["content"]
+        self.assertEqual(content[1]["type"], "image_url")
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/"))
+
+    def test_chat_mode_strips_code_fences_and_prose(self) -> None:
+        plan, _ = self._run_plan(
+            'Sure! Here it is:\n```json\n{"title": "Big Sun", "prompt": "Add a huge sun."}\n```'
+        )
+        self.assertEqual(plan["title"], "Big Sun")
+
+    def test_chat_mode_raises_on_non_json_reply(self) -> None:
+        with self.assertRaises(OpenAIImageError):
+            self._run_plan("I cannot help with that.")
+
+    def test_magic_api_mode_from_env(self) -> None:
+        with mock.patch.dict(os.environ, {"MAGIC_MODE_API": "chat"}):
+            self.assertEqual(OpenAIMagicPromptPlanner().api_mode, "chat")
+        with mock.patch.dict(os.environ, {"MAGIC_MODE_API": "nonsense"}):
+            self.assertEqual(OpenAIMagicPromptPlanner().api_mode, "responses")
 
 
 def _dict_to_namespace(value):
