@@ -268,7 +268,7 @@ svg text { font-family: var(--mono); }
 <header class="masthead">
   <div class="doc-id">
     <span>IMAGEGENCAM · ORANGE PI ZERO 2 BUILD</span>
-    <span>REV F · 2026-07</span>
+    <span>REV G · 2026-07</span>
     <span>SHEET 1 / 1</span>
   </div>
   <h1>Enclosure &amp; wiring reference</h1>
@@ -677,6 +677,51 @@ svg text { font-family: var(--mono); }
       </tbody>
     </table>
   </div>
+  <div class="figure">
+    <svg viewBox="0 0 880 330" role="img" aria-label="USB camera wiring schematic: 13-pin header pin 1 carries 5 volts on the red wire, pin 2 ground plus shield on black, pin 3 USB D minus on white, pin 4 USB D plus on green, into the camera module; the white and green wires are drawn twisted together.">
+      <text x="440" y="24" text-anchor="middle" class="svg-title">CAMERA USB — 13-PIN HEADER, PINS 1–4</text>
+      <!-- orientation reference -->
+      <rect x="40" y="46" width="130" height="30" rx="3" fill="none" stroke="var(--w-nc)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="105" y="66" text-anchor="middle" class="svg-dim">Ethernet jack</text>
+      <line x1="105" y1="76" x2="105" y2="92" stroke="var(--w-nc)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="180" y="90" class="svg-dim">pin 1 = this end</text>
+      <!-- header -->
+      <rect x="60" y="96" width="110" height="200" rx="4" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="115" y="316" text-anchor="middle" class="svg-part" font-weight="bold">13-pin header</text>
+      <g class="pin-num">
+        <text x="76" y="122">1</text><text x="76" y="152">2</text>
+        <text x="76" y="182">3</text><text x="76" y="212">4</text>
+        <text x="76" y="242">5</text><text x="76" y="272">6</text>
+      </g>
+      <g class="svg-dim">
+        <text x="92" y="122">5 V</text><text x="92" y="152">GND</text>
+        <text x="92" y="182">USB2-DM</text><text x="92" y="212">USB2-DP</text>
+        <text x="92" y="242">USB3-DM</text><text x="92" y="272">USB3-DP</text>
+      </g>
+      <!-- power + ground wires -->
+      <line x1="170" y1="118" x2="640" y2="118" stroke="var(--w-5v)" stroke-width="3"/>
+      <text x="405" y="110" text-anchor="middle" class="svg-dim" fill="var(--w-5v)">red — VBUS 5 V</text>
+      <line x1="170" y1="148" x2="640" y2="148" stroke="var(--w-gnd)" stroke-width="3"/>
+      <text x="405" y="142" text-anchor="middle" class="svg-dim">black — GND (+ shield braid, this side only)</text>
+      <!-- twisted data pair -->
+      <path d="M170,178 C 270,178 290,208 405,208 S 540,178 640,178" fill="none" stroke="var(--w-nc)" stroke-width="3"/>
+      <path d="M170,208 C 270,208 290,178 405,178 S 540,208 640,208" fill="none" stroke="var(--w-btn)" stroke-width="3"/>
+      <text x="405" y="238" text-anchor="middle" class="svg-dim">white (D−) + green (D+) — twisted pair, keep &lt; 10 cm</text>
+      <!-- spare port -->
+      <line x1="170" y1="238" x2="215" y2="238" stroke="var(--w-nc)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <line x1="170" y1="268" x2="215" y2="268" stroke="var(--w-nc)" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <text x="224" y="258" class="svg-dim">second USB port — spare</text>
+      <!-- camera -->
+      <rect x="640" y="88" width="200" height="150" rx="8" fill="var(--panel)" stroke="var(--ink)" stroke-width="2.5"/>
+      <text x="740" y="130" text-anchor="middle" class="svg-part" font-weight="bold">USB camera</text>
+      <text x="740" y="150" text-anchor="middle" class="svg-dim">module (cable cut,</text>
+      <text x="740" y="166" text-anchor="middle" class="svg-dim">plug removed)</text>
+      <circle cx="740" cy="200" r="14" fill="none" stroke="var(--ink)" stroke-width="2"/>
+      <circle cx="740" cy="200" r="7" fill="var(--ink)"/>
+      <text x="560" y="290" text-anchor="middle" class="svg-dim">solder side: pre-tin pins and wires · strain-relief the bundle before the header (hot glue / zip tie)</text>
+    </svg>
+  </div>
+  <p class="caption">FIG 4c — Camera USB wiring. If the camera's red wire feeds from the distribution board instead of pin 1, its black wire must still return to header pin 2 so data and power share a ground reference.</p>
   <div class="callout"><strong>USB wiring rules:</strong> keep the white/green pair twisted together
   and short (&lt;10 cm) — it's a 480 Mbit/s differential pair. Test with <code>lsusb</code> then
   <code>ls /dev/video*</code>. Pins 7–13 stay free (audio, TV-out, IR, 3 GPIOs).</div>
@@ -822,7 +867,7 @@ svg text { font-family: var(--mono); }
 </section>
 
 <footer>
-  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV F</span>
+  <span>IMAGEGENCAM · ORANGE PI ZERO 2 · ENCLOSURE &amp; WIRING REV G</span>
   <span>full software docs: <span class="mono">HARDWARE.md</span> in the repo</span>
 </footer>
 
