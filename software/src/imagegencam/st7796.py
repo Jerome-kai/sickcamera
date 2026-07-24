@@ -32,7 +32,6 @@ _PANEL_SIZES = {
     "ili9341": (320, 240),
 }
 
-_SPIDEV_CHUNK_BYTES = 4096  # spidev default bufsiz; chunk RAMWR data to stay under it
 
 
 def _env_int(name: str, default: int) -> int:
@@ -193,8 +192,9 @@ class ST7796:
         self._cmd(0x2B, b"\x00\x00" + (self.height - 1).to_bytes(2, "big"))  # RASET
         self._cmd(0x2C)  # RAMWR
         self._set_line(self.dc_pin, True)
-        for offset in range(0, len(buf), _SPIDEV_CHUNK_BYTES):
-            self.spi.writebytes2(buf[offset : offset + _SPIDEV_CHUNK_BYTES])
+        # writebytes2 chunks to the kernel's bufsiz internally (in C); feeding
+        # it the whole frame avoids one Python ioctl call per 4 KB slice.
+        self.spi.writebytes2(memoryview(buf))
 
     def set_backlight(self, on: bool) -> None:
         self._set_line(self.backlight_pin, bool(on))

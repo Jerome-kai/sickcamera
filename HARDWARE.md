@@ -279,4 +279,5 @@ removes all three caveats, if you ever feel like it.
 | `Permission denied` on gpiochip/spidev | re-login after `install_service.sh` (group membership), or run once with `sudo` to confirm wiring |
 | Buttons never register | pull-up bias needs a modern kernel (5.15+ image); check `gpioinfo` shows the lines as unused; worst case add external 10kΩ pull-ups to 3.3V |
 | UI has black side bars | expected (4:3 UI on a 3:2 panel); `DISPLAY_FIT=stretch` to fill |
+| Preview `display_fps` well below `capture_fps` | SPI throughput: set `DISPLAY_SPI_HZ=40000000`, and raise the kernel spidev buffer so each frame needs 8× fewer ioctls — add `spidev.bufsiz=65536` to `extraargs=` in `/boot/orangepiEnv.txt`, reboot, confirm with `cat /sys/module/spidev/parameters/bufsiz` |
 | Wi-Fi menu empty | NetworkManager not installed/managing the interface; see OS setup step 2 |

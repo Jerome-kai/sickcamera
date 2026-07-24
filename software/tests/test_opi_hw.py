@@ -32,6 +32,22 @@ class RGB565ConversionTests(unittest.TestCase):
         self.assertEqual(len(ST7796.to_rgb565_bytes(image)), WIDTH * HEIGHT * 2)
 
 
+class ShowBlitTests(unittest.TestCase):
+    def test_show_sends_full_frame_in_one_writebytes2_call(self) -> None:
+        # writebytes2 chunks to the kernel bufsiz internally; a Python-side
+        # slice loop costs one ioctl round-trip per 4 KB and halves the frame
+        # rate on the H616, so show() must hand over the whole buffer at once.
+        panel = ST7796(controller="ili9341")
+        panel.spi = mock.Mock()
+        panel._lines = mock.Mock()
+
+        panel.show(Image.new("RGB", (panel.width, panel.height)))
+
+        self.assertEqual(panel.spi.writebytes2.call_count, 1)
+        (payload,) = panel.spi.writebytes2.call_args[0]
+        self.assertEqual(len(payload), panel.width * panel.height * 2)
+
+
 class PanelControllerTests(unittest.TestCase):
     def test_default_is_st7796_480x320(self) -> None:
         panel = ST7796()
