@@ -267,6 +267,63 @@ class LatestGeneratedPathTests(unittest.TestCase):
             self.assertFalse((generated_root / "a.jpg").exists())
             self.assertTrue((generated_root / "b.jpg").exists())
 
+    def test_remote_tab_renders_virtual_buttons(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = _FakeController(Path(tmp))
+
+            html = render_page(controller).decode("utf-8")
+
+            self.assertIn('data-tab="remote"', html)
+            self.assertIn('id="panel-remote"', html)
+            for name in ("ui_up", "ui_down", "ui_album", "ui_prompt", "shutter", "magic_shutter"):
+                self.assertIn(f'data-button="{name}"', html)
+            self.assertIn("/api/button", html)
+
+    def test_button_endpoint_calls_controller_and_rejects_unknown(self) -> None:
+        import json
+        import urllib.error
+        import urllib.request
+
+        from imagegencam.web import WebServerThread
+
+        class _RemoteController(_FakeController):
+            def __init__(self, project_root: Path) -> None:
+                super().__init__(project_root)
+                self.pressed: list[str] = []
+
+            def press_virtual_button(self, name: str) -> bool:
+                if name not in {"shutter", "ui_up"}:
+                    return False
+                self.pressed.append(name)
+                return True
+
+        def post(port: int, body: dict) -> int:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/button",
+                data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    return response.status
+            except urllib.error.HTTPError as exc:
+                return exc.code
+
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = _RemoteController(Path(tmp))
+            server = WebServerThread(controller, "127.0.0.1", 0)
+            server.start()
+            try:
+                port = server.server.server_address[1]
+                self.assertEqual(post(port, {"button": "shutter"}), 200)
+                self.assertEqual(post(port, {"button": "nonsense"}), 400)
+                self.assertEqual(post(port, {}), 400)
+            finally:
+                server.stop()
+
+        self.assertEqual(controller.pressed, ["shutter"])
+
     def test_about_uses_device_details_not_live_preview(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             controller = _FakeController(Path(tmp))

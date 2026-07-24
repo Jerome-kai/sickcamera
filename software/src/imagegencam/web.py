@@ -1319,6 +1319,23 @@ def render_page(controller, message: str = "") -> bytes:
           .gallery-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
           .detail-row { grid-template-columns:1fr; gap:4px; }
         }
+        .remote-pad {
+          display:grid; grid-template-areas: ". up ." "album . prompt" ". down .";
+          grid-template-columns:1fr 1fr 1fr; gap:12px; max-width:340px; margin:18px auto;
+        }
+        .remote-up { grid-area:up; } .remote-down { grid-area:down; }
+        .remote-album { grid-area:album; } .remote-prompt { grid-area:prompt; }
+        .remote-btn {
+          font:inherit; font-weight:700; padding:20px 8px; border-radius:14px;
+          border:1px solid rgba(255,255,255,0.18); background:rgba(255,255,255,0.07);
+          color:inherit; cursor:pointer; touch-action:manipulation; user-select:none;
+        }
+        .remote-btn span { display:block; font-size:11px; font-weight:400; opacity:0.7; }
+        .remote-btn:active { background:rgba(255,255,255,0.22); transform:scale(0.97); }
+        .remote-shutter-row { display:flex; gap:12px; max-width:340px; margin:0 auto 12px; }
+        .remote-btn.shutter { flex:2; padding:26px 8px; background:#b3282d; border-color:#d4494e; }
+        .remote-btn.shutter:active { background:#d4494e; }
+        .remote-btn.magic { flex:1; }
       </style>
 
       <section class="app">
@@ -1327,6 +1344,7 @@ def render_page(controller, message: str = "") -> bytes:
           <h1 class="brand">ImageGenCam</h1>
           <nav class="nav" aria-label="App sections">
             <button class="active" type="button" data-tab="gallery">Gallery</button>
+            <button type="button" data-tab="remote">Remote</button>
             <button type="button" data-tab="prompt">Prompts</button>
             <button type="button" data-tab="about">About</button>
           </nav>
@@ -1362,6 +1380,22 @@ def render_page(controller, message: str = "") -> bytes:
             <p class="status" id="gallery-status" aria-live="polite"></p>
             <div class="gallery-grid" id="gallery-grid"></div>
           </div>
+        </section>
+
+        <section class="panel" id="panel-remote">
+          <div class="section-title"><h3>Remote</h3></div>
+          <p class="status">Drives the camera exactly like the physical buttons. Watch the panel.</p>
+          <div class="remote-pad">
+            <button class="remote-btn remote-up" type="button" data-button="ui_up">▲<span>UP</span></button>
+            <button class="remote-btn remote-album" type="button" data-button="ui_album">ALBM</button>
+            <button class="remote-btn remote-prompt" type="button" data-button="ui_prompt">PRMPT</button>
+            <button class="remote-btn remote-down" type="button" data-button="ui_down">▼<span>DOWN</span></button>
+          </div>
+          <div class="remote-shutter-row">
+            <button class="remote-btn shutter" type="button" data-button="shutter">◉ SHUTTER</button>
+            <button class="remote-btn magic" type="button" data-button="magic_shutter">✦ MAGIC</button>
+          </div>
+          <p class="status" id="remote-status" aria-live="polite"></p>
         </section>
 
         <section class="panel" id="panel-about">
@@ -1738,7 +1772,26 @@ def render_page(controller, message: str = "") -> bytes:
           });
         });
 
-        const initialTab = ["prompt", "gallery", "about"].includes(location.hash.slice(1))
+        const remoteStatus = document.getElementById("remote-status");
+        document.querySelectorAll(".remote-btn").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const name = button.dataset.button;
+            try {
+              const response = await fetch("/api/button", {
+                method: "POST",
+                headers: { "Content-Type": "application/json;charset=UTF-8" },
+                body: JSON.stringify({ button: name }),
+              });
+              remoteStatus.textContent = response.ok
+                ? `Sent ${name.replace("ui_", "").toUpperCase()}.`
+                : "Press failed.";
+            } catch {
+              remoteStatus.textContent = "Press failed.";
+            }
+          });
+        });
+
+        const initialTab = ["prompt", "gallery", "about", "remote"].includes(location.hash.slice(1))
           ? location.hash.slice(1)
           : "gallery";
         renderPrompts();
@@ -2236,6 +2289,20 @@ def build_handler(controller):
                     return
                 magic_history = controller.mark_magic_history_promoted(entry_id, prompt_id)
                 self._send_json({"ok": True, "magic_history": build_magic_history_list(controller)})
+                return
+            if self.path == "/api/button":
+                payload = self._read_json_body()
+                if payload is None:
+                    return
+                name = str(payload.get("button") or "").strip()
+                press = getattr(controller, "press_virtual_button", None)
+                if not name or press is None:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing or unsupported button")
+                    return
+                if not press(name):
+                    self.send_error(HTTPStatus.BAD_REQUEST, f"Unknown button: {name}")
+                    return
+                self._send_json({"ok": True, "button": name})
                 return
             if self.path == "/api/images/delete":
                 payload = self._read_json_body()

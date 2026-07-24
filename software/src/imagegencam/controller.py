@@ -504,6 +504,22 @@ class ImageGenCamController:
         self.last_shutter_event_times[event_name] = now
         self.event_queue.put(event_name)
 
+    def press_virtual_button(self, name: str) -> bool:
+        """Inject a button press from the web remote, as if the switch closed."""
+        name = str(name).strip().lower()
+        if name in {"ui_up", "ui_down", "ui_album", "ui_prompt"}:
+            self._queue_ui_event(name)
+            return True
+        if name == "shutter":
+            self._queue_shutter_event("shutter")
+            return True
+        if name == "magic_shutter":
+            if not self.magic_mode_enabled:
+                return False
+            self._queue_shutter_event("magic_shutter")
+            return True
+        return False
+
     def _poll_buttons(self) -> None:
         if not self.use_button_polling:
             return
