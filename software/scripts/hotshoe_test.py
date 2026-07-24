@@ -22,6 +22,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from imagegencam.config import load_env_file  # noqa: E402
+
+load_env_file(PROJECT_ROOT / ".env")
+
 from imagegencam.opi_hw import HotShoe  # noqa: E402
 
 

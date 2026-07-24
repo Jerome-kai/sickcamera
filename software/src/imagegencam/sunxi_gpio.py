@@ -197,7 +197,7 @@ def request_outputs(lines: list[int], consumer: str = "imagegencam"):
             if backend == "gpiod":
                 return GpiodOutputs(lines, consumer)
             return SysfsOutputs(lines)
-        except (ImportError, OSError, NotImplementedError) as exc:
+        except (ImportError, OSError, NotImplementedError, ValueError) as exc:
             logger.info("GPIO output backend %s unavailable: %s", backend, exc)
             last_error = exc
     raise RuntimeError(f"No usable GPIO backend for outputs {lines}: {last_error}")
@@ -210,7 +210,7 @@ def request_inputs(lines: list[int], consumer: str = "imagegencam", pull_up: boo
             if backend == "gpiod":
                 return GpiodInputs(lines, consumer, pull_up=pull_up)
             return SysfsInputs(lines, pull_up=pull_up)
-        except (ImportError, OSError, NotImplementedError) as exc:
+        except (ImportError, OSError, NotImplementedError, ValueError) as exc:
             logger.info("GPIO input backend %s unavailable: %s", backend, exc)
             last_error = exc
     raise RuntimeError(f"No usable GPIO backend for inputs {lines}: {last_error}")
