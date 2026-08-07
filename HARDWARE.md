@@ -267,6 +267,30 @@ removes all three caveats, if you ever feel like it.
 6. **Services**: `./scripts/install_service.sh`, then
    `sudo systemctl enable --now imagegencam.service`, reboot test.
 
+## Joining a new Wi-Fi network without a terminal
+
+A camera given away as a gift boots somewhere none of its saved networks exist, and
+its web UI is only reachable once it is already online. The setup hotspot closes that
+loop, and needs neither SSH nor the physical buttons:
+
+1. Power the camera on and wait for the display. After ~45 s with no known network
+   (`WIFI_SETUP_GRACE_SECONDS`), it publishes its own Wi-Fi and shows the join details:
+   hotspot name, password, and `http://10.42.0.1`.
+2. Join that hotspot from a phone and open the address shown on the screen.
+3. Open the **Wi-Fi** tab, pick a network, type the password, press **Connect**.
+4. The hotspot shuts down so the radio can join the chosen network, so the phone loses
+   that page — this is expected. Reconnect the phone to the same network and open
+   `http://<hostname>.local`. The camera's display shows its new address too.
+
+If the network is wrong or the password is mistyped, the camera brings its hotspot back
+by itself, so it never becomes unreachable. The same **Wi-Fi** tab also works normally
+once the camera is online, which is the easy way to move it between a home network and
+a phone hotspot.
+
+Defaults live in `.env` (`WIFI_SETUP_AP_SSID`, `WIFI_SETUP_AP_PASSWORD`, and
+`WIFI_SETUP_PORTAL=0` to switch the whole thing off). The hotspot needs the sudoers
+rules from `install_service.sh` — rerun it after upgrading an older install.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -281,3 +305,5 @@ removes all three caveats, if you ever feel like it.
 | UI has black side bars | expected (4:3 UI on a 3:2 panel); `DISPLAY_FIT=stretch` to fill |
 | Preview `display_fps` well below `capture_fps` | SPI throughput: set `DISPLAY_SPI_HZ=40000000`, and raise the kernel spidev buffer so each frame needs 8× fewer ioctls — add `spidev.bufsiz=65536` to `extraargs=` in `/boot/orangepiEnv.txt`, reboot, confirm with `cat /sys/module/spidev/parameters/bufsiz` |
 | Wi-Fi menu empty | NetworkManager not installed/managing the interface; see OS setup step 2 |
+| Setup hotspot never appears | rerun `install_service.sh` (adds the sudoers rules), check `WIFI_SETUP_PORTAL=1`, and confirm the adapter supports AP mode: `iw list \| grep -A6 "Supported interface modes"` |
+| Setup hotspot appears but the web page does not load | the camera serves it on port 80 via the service; if you started `run.sh` by hand it is on `http://10.42.0.1:8000` |

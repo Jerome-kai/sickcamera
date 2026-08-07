@@ -33,6 +33,7 @@ from .job_store import PersistentJobStore
 from .openai_client import OpenAIImageEditor, OpenAIImageError, OpenAIMagicPromptPlanner
 from .web import delete_cached_thumbnail
 from .wifi_manager import NetworkManagerWifi, WifiNetwork, WifiRollback
+from .wifi_setup import SetupAccessPoint, current_ipv4
 
 
 WIDTH = 320
@@ -245,6 +246,19 @@ class ImageGenCamController:
         self.wifi_connect_thread: Thread | None = None
         self.wifi_connect_message = ""
         self.wifi_connecting = False
+
+        self.setup_access_point = SetupAccessPoint()
+        self.setup_portal_active = False
+        self.setup_portal_thread: Thread | None = None
+        self.setup_portal_checked = False
+        # Scanning is unreliable while the radio is serving a hotspot, so the
+        # list the phone sees is the one captured just before it came up.
+        self.setup_portal_networks: list[WifiNetwork] = []
+        self.setup_portal_message = ""
+        self.setup_grace_seconds = float(os.environ.get("WIFI_SETUP_GRACE_SECONDS", "45"))
+        self.setup_portal_enabled = (
+            os.environ.get("WIFI_SETUP_PORTAL", "1").strip().lower() not in {"0", "false", "no"}
+        )
 
         self.button_lookup: dict[int, str] = {}
         self.use_button_polling = False
@@ -2458,6 +2472,64 @@ class ImageGenCamController:
         draw.text((78, 144), f"Auto-rollback in {seconds_left}s", font=meta_font, fill=(60, 60, 60))
         self._render_to_display(screen.convert("RGB"))
 
+    def _render_wifi_setup_frame(self) -> None:
+        """Join instructions for the setup hotspot, readable across a room."""
+        screen = self._get_modal_background().convert("RGBA")
+        screen = self._apply_glass_panel(
+            screen,
+            (24, 24, WIDTH - 24, HEIGHT - 24),
+            radius=18,
+            fill=(255, 255, 255, 214),
+            outline=(255, 255, 255, 240),
+        )
+        draw = ImageDraw.Draw(screen)
+        title_font = self._load_font(17)
+        body_font = self._load_font(13)
+        meta_font = self._load_font(11)
+        access_point = self.setup_access_point.info()
+        text_width = WIDTH - 96
+
+        if self.wifi_connecting:
+            draw.text((44, 60), "Connecting...", font=title_font, fill=(18, 18, 18))
+            draw.text(
+                (44, 96),
+                self._truncate_text_pixels(self.setup_portal_message, body_font, text_width),
+                font=body_font,
+                fill=(60, 60, 60),
+            )
+            draw.text((44, 150), "The screen shows the address", font=meta_font, fill=(90, 90, 90))
+            draw.text((44, 168), "once the camera is online.", font=meta_font, fill=(90, 90, 90))
+        elif access_point.active:
+            draw.text((44, 44), "Wi-Fi setup", font=title_font, fill=(18, 18, 18))
+            draw.text((44, 76), "1. Join this hotspot:", font=meta_font, fill=(90, 90, 90))
+            draw.text(
+                (44, 92),
+                self._truncate_text_pixels(access_point.ssid, body_font, text_width),
+                font=body_font,
+                fill=(18, 18, 18),
+            )
+            draw.text((44, 116), "2. Password:", font=meta_font, fill=(90, 90, 90))
+            draw.text((44, 132), access_point.password, font=body_font, fill=(18, 18, 18))
+            draw.text((44, 156), "3. Open in a browser:", font=meta_font, fill=(90, 90, 90))
+            draw.text((44, 172), access_point.url, font=body_font, fill=(18, 18, 18))
+        else:
+            address = current_ipv4()
+            hostname = f"{socket.gethostname().strip() or 'imagegencam'}.local"
+            draw.text((44, 56), "Camera online", font=title_font, fill=(18, 18, 18))
+            draw.text(
+                (44, 90),
+                self._truncate_text_pixels(
+                    self.setup_portal_message or self._get_wifi_ssid(), body_font, text_width
+                ),
+                font=body_font,
+                fill=(60, 60, 60),
+            )
+            draw.text((44, 126), "Open in a browser:", font=meta_font, fill=(90, 90, 90))
+            draw.text((44, 142), f"http://{hostname}", font=body_font, fill=(18, 18, 18))
+            if address:
+                draw.text((44, 166), f"or http://{address}", font=meta_font, fill=(90, 90, 90))
+        self._render_to_display(screen.convert("RGB"))
+
     def _build_current_album_download_url(self) -> str | None:
         path = self._current_album_path()
         if path is None:
@@ -3003,6 +3075,170 @@ class ImageGenCamController:
             self.state.status_message = "Diagnostics"
         self.last_drawn_mode = None
 
+    # -- first-run setup portal ----------------------------------------
+
+    def start_setup_portal_watchdog(self) -> None:
+        """Publish a setup hotspot if the camera never finds a network."""
+        if not self.setup_portal_enabled or self.setup_portal_thread is not None:
+            return
+        self.setup_portal_thread = Thread(
+            target=self._setup_portal_watchdog, name="wifi-setup-portal", daemon=True
+        )
+        self.setup_portal_thread.start()
+
+    def _setup_portal_watchdog(self) -> None:
+        # NetworkManager needs a moment to try every saved network before we
+        # can call the camera offline.
+        deadline = time.monotonic() + self.setup_grace_seconds
+        while self.running and time.monotonic() < deadline:
+            if self.setup_access_point.is_online():
+                self.setup_portal_checked = True
+                return
+            time.sleep(3.0)
+        self.setup_portal_checked = True
+        if not self.running or self.setup_access_point.is_online():
+            return
+        logger.info(
+            "No Wi-Fi after %.0fs; publishing the setup hotspot", self.setup_grace_seconds
+        )
+        self.open_setup_portal()
+
+    def open_setup_portal(self) -> bool:
+        # Capture the network list first: the radio cannot scan reliably once
+        # it is serving a hotspot, and this list is what the phone will pick from.
+        try:
+            self.setup_portal_networks = self.wifi_manager.scan_networks()
+        except Exception:
+            logger.exception("Wi-Fi scan before setup hotspot failed")
+            self.setup_portal_networks = self.wifi_manager.list_saved_networks()
+        if not self.setup_access_point.start():
+            self.setup_portal_message = "Could not start the setup hotspot."
+            return False
+        self.setup_portal_active = True
+        self.setup_portal_message = ""
+        with self.state_lock:
+            self.state.mode = "wifi_setup"
+            self.state.status_message = "Wi-Fi setup"
+        self.last_drawn_mode = None
+        return True
+
+    def close_setup_portal(self) -> None:
+        self.setup_access_point.stop()
+        self.setup_portal_active = False
+
+    def setup_portal_status(self) -> dict[str, object]:
+        access_point = self.setup_access_point.info()
+        online = self.setup_access_point.is_online()
+        return {
+            "online": online,
+            "ssid": self._get_wifi_ssid() if online else "",
+            "ip_address": current_ipv4() or "",
+            "hostname": f"{socket.gethostname().strip() or 'imagegencam'}.local",
+            "portal_active": access_point.active,
+            "portal_ssid": access_point.ssid,
+            "portal_password": access_point.password,
+            "portal_url": access_point.url,
+            "message": self.setup_portal_message,
+            "connecting": self.wifi_connecting,
+        }
+
+    def list_wifi_networks_for_web(self) -> list[dict[str, object]]:
+        """Networks to offer in the web picker.
+
+        While the hotspot is up the radio cannot scan, so the pre-hotspot
+        snapshot is served instead of an empty list.
+        """
+        if self.setup_access_point.is_active():
+            networks = self.setup_portal_networks
+        else:
+            try:
+                networks = self.wifi_manager.scan_networks()
+            except Exception:
+                logger.exception("Wi-Fi scan for the web picker failed")
+                networks = self.wifi_manager.list_saved_networks()
+        return [
+            {
+                "ssid": network.ssid,
+                "saved": network.saved,
+                "active": network.active,
+                "secure": network.secure,
+                "signal": network.signal,
+            }
+            for network in networks
+        ]
+
+    def begin_wifi_connect_from_web(self, ssid: str, password: str = "") -> dict[str, object]:
+        """Join a network in the background and report how to follow the camera.
+
+        The phone issuing this request is usually connected to the camera's own
+        hotspot, which has to come down before the camera can join anything.
+        That kills the phone's connection to this page, so the switch runs in a
+        background thread and the response is sent while the link still works.
+        """
+        ssid = str(ssid).strip()
+        if not ssid:
+            return {"ok": False, "message": "Choose a network first."}
+        if self.wifi_connecting:
+            return {"ok": False, "message": "Already connecting; give it a moment."}
+
+        was_portal = self.setup_access_point.is_active()
+        self.wifi_connecting = True
+        self.setup_portal_message = f"Connecting to {ssid}..."
+        with self.state_lock:
+            self.state.mode = "wifi_setup"
+        self.last_drawn_mode = None
+
+        thread = Thread(
+            target=self._run_wifi_connect_from_web,
+            args=(ssid, password, was_portal),
+            name="wifi-web-connect",
+            daemon=True,
+        )
+        thread.start()
+        self.wifi_connect_thread = thread
+
+        hostname = f"{socket.gethostname().strip() or 'imagegencam'}.local"
+        return {
+            "ok": True,
+            "applying": True,
+            "ssid": ssid,
+            "hostname": hostname,
+            "message": (
+                f"Joining {ssid}. The camera's hotspot is shutting down, so this page "
+                f"will stop responding. Reconnect this phone to {ssid}, then open "
+                f"http://{hostname} -- the camera's screen shows its address too."
+            ),
+        }
+
+    def _run_wifi_connect_from_web(self, ssid: str, password: str, was_portal: bool) -> None:
+        try:
+            self.close_setup_portal()
+            result = self.wifi_manager.connect_new(ssid, password)
+            if result.returncode == 0 and self.setup_access_point.is_online():
+                address = current_ipv4() or ""
+                self.setup_portal_message = f"Connected to {ssid}"
+                logger.info("Joined %r from the web setup page (%s)", ssid, address or "no lease")
+                with self.state_lock:
+                    self.state.mode = "wifi_setup"
+                self.last_drawn_mode = None
+                return
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            reason = detail[-1] if detail else "connection failed"
+            self.setup_portal_message = f"{ssid} failed: {reason}"
+            logger.warning("Joining %r failed: %s", ssid, reason)
+            # Never strand the camera: bring the hotspot back so the owner can retry.
+            if was_portal:
+                self.open_setup_portal()
+                self.setup_portal_message = f"{ssid} failed: {reason}"
+        except Exception as exc:
+            logger.exception("Web Wi-Fi connect failed")
+            self.setup_portal_message = f"Wi-Fi error: {exc}"
+            if was_portal:
+                self.open_setup_portal()
+        finally:
+            self.wifi_connecting = False
+            self.last_drawn_mode = None
+
     def _enter_wifi_menu(self, *, rescan: bool = False) -> None:
         try:
             self.wifi_networks = self.wifi_manager.scan_networks()
@@ -3233,6 +3469,11 @@ class ImageGenCamController:
                 self._select_wifi_detail_option()
             elif mode == "wifi_keyboard":
                 self._keyboard_submit()
+            elif mode == "wifi_setup":
+                # Dismiss the setup screen, but only once there is a network to
+                # go back to -- otherwise the instructions would be unreachable.
+                if not self.setup_access_point.is_active() and not self.wifi_connecting:
+                    self._exit_to_preview()
             return
 
         if self._maybe_trigger_diagnostics(event, mode):
@@ -3338,6 +3579,7 @@ class ImageGenCamController:
                 self._keyboard_scroll(1)
 
     def run(self) -> None:
+        self.start_setup_portal_watchdog()
         try:
             while self.running:
                 now = time.monotonic()
@@ -3465,6 +3707,14 @@ class ImageGenCamController:
                         or (now - self.menu_last_redraw_at) >= 1.0
                     ):
                         self._render_wifi_confirm_frame()
+                        self.menu_last_redraw_at = now
+                        self.last_drawn_mode = mode
+                elif mode == "wifi_setup":
+                    if (
+                        self.last_drawn_mode != mode
+                        or (now - self.menu_last_redraw_at) >= 1.0
+                    ):
+                        self._render_wifi_setup_frame()
                         self.menu_last_redraw_at = now
                         self.last_drawn_mode = mode
                 else:

@@ -1336,6 +1336,22 @@ def render_page(controller, message: str = "") -> bytes:
         .remote-btn.shutter { flex:2; padding:26px 8px; background:#b3282d; border-color:#d4494e; }
         .remote-btn.shutter:active { background:#d4494e; }
         .remote-btn.magic { flex:1; }
+        .wifi-list { display:flex; flex-direction:column; gap:8px; margin:14px 0; }
+        .wifi-item {
+          font:inherit; display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+          padding:14px 12px; border-radius:12px; color:inherit; cursor:pointer;
+          border:1px solid rgba(255,255,255,0.18); background:rgba(255,255,255,0.07);
+        }
+        .wifi-item:active { background:rgba(255,255,255,0.22); }
+        .wifi-item .wifi-name { flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .wifi-item .wifi-tag { font-size:11px; opacity:0.7; }
+        .wifi-form { display:flex; flex-direction:column; gap:10px; margin:14px 0; }
+        .wifi-label { font-size:13px; opacity:0.8; }
+        .wifi-password {
+          font:inherit; padding:12px; border-radius:10px; color:inherit;
+          border:1px solid rgba(255,255,255,0.24); background:rgba(0,0,0,0.25);
+        }
+        .wifi-actions { display:flex; gap:10px; flex-wrap:wrap; }
       </style>
 
       <section class="app">
@@ -1346,6 +1362,7 @@ def render_page(controller, message: str = "") -> bytes:
             <button class="active" type="button" data-tab="gallery">Gallery</button>
             <button type="button" data-tab="remote">Remote</button>
             <button type="button" data-tab="prompt">Prompts</button>
+            <button type="button" data-tab="wifi">Wi-Fi</button>
             <button type="button" data-tab="about">About</button>
           </nav>
         </header>
@@ -1396,6 +1413,25 @@ def render_page(controller, message: str = "") -> bytes:
             <button class="remote-btn magic" type="button" data-button="magic_shutter">✦ MAGIC</button>
           </div>
           <p class="status" id="remote-status" aria-live="polite"></p>
+        </section>
+
+        <section class="panel" id="panel-wifi">
+          <div class="section-title"><h3>Wi-Fi</h3></div>
+          <p class="status" id="wifi-current" aria-live="polite">Checking...</p>
+          <div class="wifi-actions">
+            <button class="action" type="button" id="wifi-scan-button">Scan for networks</button>
+          </div>
+          <div id="wifi-list" class="wifi-list"></div>
+          <div class="wifi-form" id="wifi-form" hidden>
+            <label class="wifi-label" for="wifi-password">Password for <span id="wifi-target"></span></label>
+            <input class="wifi-password" id="wifi-password" type="password" autocomplete="off"
+                   autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Wi-Fi password">
+            <div class="wifi-actions">
+              <button class="action primary" type="button" id="wifi-connect-button">Connect</button>
+              <button class="action" type="button" id="wifi-cancel-button">Cancel</button>
+            </div>
+          </div>
+          <p class="status" id="wifi-status" aria-live="polite"></p>
         </section>
 
         <section class="panel" id="panel-about">
@@ -1450,6 +1486,8 @@ def render_page(controller, message: str = "") -> bytes:
             panel.classList.toggle("active", panel.id === `panel-${name}`);
           });
           history.replaceState(null, "", `#${name}`);
+          // Opening the tab should already show networks; scanning takes seconds.
+          if (name === "wifi" && !wifiList.childElementCount) scanWifiNetworks();
         }
 
         function currentImage() {
@@ -1791,7 +1829,114 @@ def render_page(controller, message: str = "") -> bytes:
           });
         });
 
-        const initialTab = ["prompt", "gallery", "about", "remote"].includes(location.hash.slice(1))
+        const wifiCurrent = document.getElementById("wifi-current");
+        const wifiStatus = document.getElementById("wifi-status");
+        const wifiList = document.getElementById("wifi-list");
+        const wifiForm = document.getElementById("wifi-form");
+        const wifiTarget = document.getElementById("wifi-target");
+        const wifiPassword = document.getElementById("wifi-password");
+        const wifiScanButton = document.getElementById("wifi-scan-button");
+        let wifiSelected = null;
+
+        function renderWifiStatus(status) {
+          if (status.portal_active) {
+            wifiCurrent.textContent =
+              `Setup hotspot "${status.portal_ssid}" is running. Pick the network the camera should join.`;
+          } else if (status.online) {
+            const at = status.ip_address ? ` (${status.ip_address})` : "";
+            wifiCurrent.textContent = `Connected to ${status.ssid || "Wi-Fi"}${at}.`;
+          } else {
+            wifiCurrent.textContent = "Not connected to any network.";
+          }
+          if (status.message) wifiStatus.textContent = status.message;
+        }
+
+        async function refreshWifiStatus() {
+          try {
+            const response = await fetch("/api/wifi/status");
+            if (response.ok) renderWifiStatus(await response.json());
+          } catch {
+            /* The camera drops off the network mid-switch; the poll retries. */
+          }
+        }
+
+        function selectWifiNetwork(network) {
+          wifiSelected = network;
+          wifiTarget.textContent = network.ssid;
+          wifiPassword.value = "";
+          // A saved or open network needs no password, so skip straight to Connect.
+          wifiForm.hidden = false;
+          wifiPassword.hidden = !network.secure || network.saved;
+          if (!wifiPassword.hidden) wifiPassword.focus();
+        }
+
+        function renderWifiNetworks(networks) {
+          wifiList.innerHTML = "";
+          if (!networks.length) {
+            wifiStatus.textContent = "No networks found. Move closer and scan again.";
+            return;
+          }
+          networks.forEach((network) => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "wifi-item";
+            const tags = [];
+            if (network.active) tags.push("connected");
+            else if (network.saved) tags.push("saved");
+            if (!network.secure) tags.push("open");
+            if (Number.isFinite(network.signal)) tags.push(`${network.signal}%`);
+            item.innerHTML = `
+              <span class="wifi-name"></span>
+              <span class="wifi-tag">${tags.join(" · ")}</span>
+            `;
+            item.querySelector(".wifi-name").textContent = network.ssid;
+            item.addEventListener("click", () => selectWifiNetwork(network));
+            wifiList.appendChild(item);
+          });
+        }
+
+        async function scanWifiNetworks() {
+          wifiScanButton.disabled = true;
+          wifiStatus.textContent = "Scanning...";
+          try {
+            const response = await fetch("/api/wifi/networks");
+            if (!response.ok) throw new Error("scan failed");
+            const payload = await response.json();
+            renderWifiNetworks(payload.networks || []);
+            if ((payload.networks || []).length) wifiStatus.textContent = "";
+          } catch {
+            wifiStatus.textContent = "Scan failed.";
+          } finally {
+            wifiScanButton.disabled = false;
+          }
+        }
+
+        wifiScanButton.addEventListener("click", scanWifiNetworks);
+        document.getElementById("wifi-cancel-button").addEventListener("click", () => {
+          wifiForm.hidden = true;
+          wifiSelected = null;
+        });
+        document.getElementById("wifi-connect-button").addEventListener("click", async () => {
+          if (!wifiSelected) return;
+          wifiStatus.textContent = `Connecting to ${wifiSelected.ssid}...`;
+          try {
+            const response = await fetch("/api/wifi/connect", {
+              method: "POST",
+              headers: { "Content-Type": "application/json;charset=UTF-8" },
+              body: JSON.stringify({ ssid: wifiSelected.ssid, password: wifiPassword.value }),
+            });
+            const payload = await response.json();
+            wifiStatus.textContent = payload.message || "Connecting...";
+          } catch {
+            wifiStatus.textContent =
+              "The camera stopped responding, which is expected while it switches networks. " +
+              "Reconnect this phone to the network you picked, then reload.";
+          }
+          wifiForm.hidden = true;
+          wifiPassword.value = "";
+        });
+
+        const initialTab = ["prompt", "gallery", "about", "remote", "wifi"].includes(location.hash.slice(1))
           ? location.hash.slice(1)
           : "gallery";
         renderPrompts();
@@ -1800,8 +1945,11 @@ def render_page(controller, message: str = "") -> bytes:
         selectTab(initialTab);
         refreshImages().catch(() => {});
         refreshDeviceDetails().catch(() => {});
+        refreshWifiStatus();
+        if (initialTab === "wifi") scanWifiNetworks();
         setInterval(() => refreshImages().catch(() => {}), 5000);
         setInterval(() => refreshDeviceDetails().catch(() => {}), 5000);
+        setInterval(refreshWifiStatus, 5000);
       </script>
     """
     body = (
@@ -2148,6 +2296,20 @@ def build_handler(controller):
             if request_path in {"/screen-preview.jpg", "/screen-preview.png"}:
                 self._serve_screen_preview()
                 return
+            if request_path == "/api/wifi/status":
+                status = getattr(controller, "setup_portal_status", None)
+                if status is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Wi-Fi setup unavailable")
+                    return
+                self._send_json(status())
+                return
+            if request_path == "/api/wifi/networks":
+                listing = getattr(controller, "list_wifi_networks_for_web", None)
+                if listing is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Wi-Fi setup unavailable")
+                    return
+                self._send_json({"networks": listing()})
+                return
             if request_path == "/manifest.webmanifest":
                 body = build_manifest_bytes()
                 self.send_response(HTTPStatus.OK)
@@ -2303,6 +2465,20 @@ def build_handler(controller):
                     self.send_error(HTTPStatus.BAD_REQUEST, f"Unknown button: {name}")
                     return
                 self._send_json({"ok": True, "button": name})
+                return
+            if self.path == "/api/wifi/connect":
+                payload = self._read_json_body()
+                if payload is None:
+                    return
+                connect = getattr(controller, "begin_wifi_connect_from_web", None)
+                if connect is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Wi-Fi setup unavailable")
+                    return
+                ssid = str(payload.get("ssid") or "").strip()
+                if not ssid:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing ssid")
+                    return
+                self._send_json(connect(ssid, str(payload.get("password") or "")))
                 return
             if self.path == "/api/images/delete":
                 payload = self._read_json_body()

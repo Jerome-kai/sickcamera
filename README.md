@@ -145,6 +145,27 @@ it. Built-in prompts include:
 Reminder: your phone must be on the same Wi-Fi network as the camera to access
 the mobile app.
 
+## Connecting the camera to Wi-Fi
+
+The camera joins its saved networks automatically. Somewhere new — a friend's
+house, a phone hotspot, the first time it is switched on — it publishes its own
+Wi-Fi instead and shows the join details on its display:
+
+1. Join the hotspot named on the screen, using the password shown under it.
+2. Open the address on the screen (`http://10.42.0.1`).
+3. Go to the **Wi-Fi** tab, pick the network, enter its password, press
+   **Connect**.
+
+The camera's hotspot then shuts down so it can join the network you picked, so
+that page stops loading — that part is normal. Put your phone back on the same
+network and open `http://<camera-hostname>.local`; the display shows the
+camera's address as well. Pick the wrong network and it simply brings its own
+hotspot back so you can try again.
+
+No terminal and no buttons are needed for any of this, which makes the camera
+safe to hand to someone else. See [HARDWARE.md](HARDWARE.md) for the settings
+that control it.
+
 ## Remix It
 
 Once the basics are working, you've got a tiny programmable camera platform.

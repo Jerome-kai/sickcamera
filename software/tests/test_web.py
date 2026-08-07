@@ -324,6 +324,79 @@ class LatestGeneratedPathTests(unittest.TestCase):
 
         self.assertEqual(controller.pressed, ["shutter"])
 
+    def test_wifi_tab_renders_the_setup_picker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = _FakeController(Path(tmp))
+
+            html = render_page(controller).decode("utf-8")
+
+            self.assertIn('data-tab="wifi"', html)
+            self.assertIn('id="panel-wifi"', html)
+            self.assertIn("/api/wifi/networks", html)
+            self.assertIn("/api/wifi/connect", html)
+            self.assertIn("/api/wifi/status", html)
+
+    def test_wifi_endpoints_expose_status_networks_and_connect(self) -> None:
+        import json
+        import urllib.error
+        import urllib.request
+
+        from imagegencam.web import WebServerThread
+
+        class _WifiController(_FakeController):
+            def __init__(self, project_root: Path) -> None:
+                super().__init__(project_root)
+                self.attempts: list[tuple[str, str]] = []
+
+            def setup_portal_status(self) -> dict:
+                return {"online": False, "portal_active": True, "portal_ssid": "ImageGenCam-Setup"}
+
+            def list_wifi_networks_for_web(self) -> list[dict]:
+                return [{"ssid": "Home WiFi", "saved": False, "active": False, "secure": True, "signal": 71}]
+
+            def begin_wifi_connect_from_web(self, ssid: str, password: str = "") -> dict:
+                self.attempts.append((ssid, password))
+                return {"ok": True, "applying": True, "ssid": ssid}
+
+        def get(port: int, path: str) -> tuple[int, dict]:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
+                return response.status, json.loads(response.read())
+
+        def post(port: int, body: dict) -> int:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/wifi/connect",
+                data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    return response.status
+            except urllib.error.HTTPError as exc:
+                return exc.code
+
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = _WifiController(Path(tmp))
+            server = WebServerThread(controller, "127.0.0.1", 0)
+            server.start()
+            try:
+                port = server.server.server_address[1]
+
+                status_code, status = get(port, "/api/wifi/status")
+                self.assertEqual(status_code, 200)
+                self.assertTrue(status["portal_active"])
+
+                networks_code, networks = get(port, "/api/wifi/networks")
+                self.assertEqual(networks_code, 200)
+                self.assertEqual([item["ssid"] for item in networks["networks"]], ["Home WiFi"])
+
+                self.assertEqual(post(port, {"ssid": "Home WiFi", "password": "hunter22"}), 200)
+                self.assertEqual(post(port, {"password": "hunter22"}), 400)
+            finally:
+                server.stop()
+
+        self.assertEqual(controller.attempts, [("Home WiFi", "hunter22")])
+
     def test_about_uses_device_details_not_live_preview(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             controller = _FakeController(Path(tmp))
