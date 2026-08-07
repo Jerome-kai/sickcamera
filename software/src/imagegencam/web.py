@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import io
 import json
@@ -1034,6 +1036,40 @@ def get_or_create_thumbnail(controller, relative_path: str) -> Path | None:
     return thumb_path
 
 
+# A reference image only needs to carry style, so this ceiling is generous
+# while still rejecting an accidental multi-megapixel upload outright.
+MAX_REFERENCE_IMAGE_BYTES = 12 * 1024 * 1024
+
+
+def decode_image_data_url(data_url: str) -> bytes:
+    """Bytes from a `data:image/...;base64,...` URL produced by the file picker."""
+    header, _, encoded = data_url.partition(",")
+    if not encoded or not header.startswith("data:image/") or "base64" not in header:
+        raise ValueError("Expected a base64 image data URL")
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Image data is not valid base64") from exc
+    if not image_bytes:
+        raise ValueError("Image data is empty")
+    if len(image_bytes) > MAX_REFERENCE_IMAGE_BYTES:
+        raise ValueError("Image is too large")
+    return image_bytes
+
+
+def get_prompt_reference_image(controller, filename: str) -> Path | None:
+    """Resolve a reference image request, refusing anything outside the folder."""
+    root = getattr(controller, "prompt_reference_root", None)
+    if root is None or not filename:
+        return None
+    candidate = (Path(root) / unquote(filename)).resolve()
+    try:
+        candidate.relative_to(Path(root).resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def build_device_details(controller) -> dict[str, object]:
     if hasattr(controller, "get_device_details"):
         try:
@@ -1353,6 +1389,14 @@ def render_page(controller, message: str = "") -> bytes:
           border:1px solid rgba(255,255,255,0.24); background:rgba(0,0,0,0.25);
         }
         .wifi-actions { display:flex; gap:10px; flex-wrap:wrap; }
+        .prompt-reference { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+        .prompt-reference-thumb {
+          width:100%; max-width:180px; border-radius:10px; display:block;
+          border:1px solid rgba(255,255,255,0.18);
+        }
+        .prompt-reference-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+        .prompt-reference-add { cursor:pointer; }
+        .prompt-reference-hint { margin:0; font-size:11px; opacity:0.6; }
       </style>
 
       <section class="app">
@@ -1508,6 +1552,17 @@ def render_page(controller, message: str = "") -> bytes:
               </div>
               <input class="prompt-title-field" type="text" maxlength="${PROMPT_TITLE_MAX_LENGTH}" placeholder="Title" value="">
               <textarea class="prompt-body-field" placeholder="Prompt body"></textarea>
+              <div class="prompt-reference">
+                <img class="prompt-reference-thumb" alt="Reference image" hidden>
+                <div class="prompt-reference-actions">
+                  <label class="action prompt-reference-add">
+                    <span></span>
+                    <input class="prompt-reference-input" type="file" accept="image/*" hidden>
+                  </label>
+                  <button type="button" class="action prompt-reference-remove" hidden>Remove image</button>
+                </div>
+                <p class="prompt-reference-hint">Sent with every photo as a style reference.</p>
+              </div>
             `;
             card.querySelector(".prompt-title-field").value = entry.title || "";
             card.querySelector(".prompt-body-field").value = entry.body || "";
@@ -1519,7 +1574,77 @@ def render_page(controller, message: str = "") -> bytes:
               renderPrompts();
               schedulePromptSave();
             });
+            renderPromptReference(card, entry);
             promptList.appendChild(card);
+          });
+        }
+
+        function renderPromptReference(card, entry) {
+          const thumb = card.querySelector(".prompt-reference-thumb");
+          const addLabel = card.querySelector(".prompt-reference-add span");
+          const removeButton = card.querySelector(".prompt-reference-remove");
+          const input = card.querySelector(".prompt-reference-input");
+          const attached = Boolean(entry.reference_image);
+
+          if (attached) {
+            // Cache-bust so replacing an image updates the visible thumbnail.
+            thumb.src = `/prompt-references/${encodeURIComponent(entry.reference_image)}?v=${Date.now()}`;
+          }
+          thumb.hidden = !attached;
+          removeButton.hidden = !attached;
+          addLabel.textContent = attached ? "Replace image" : "Add image";
+
+          input.addEventListener("change", async () => {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            const promptId = card.dataset.promptId;
+            if (!promptId) {
+              promptStatus.textContent = "Save the prompt before adding an image.";
+              return;
+            }
+            promptStatus.textContent = "Uploading image...";
+            try {
+              const dataUrl = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error("read failed"));
+                reader.readAsDataURL(file);
+              });
+              const response = await fetch("/api/prompts/reference", {
+                method: "POST",
+                headers: { "Content-Type": "application/json;charset=UTF-8" },
+                body: JSON.stringify({ prompt_id: promptId, image: dataUrl }),
+              });
+              if (!response.ok) throw new Error("upload failed");
+              const payload = await response.json();
+              promptEntries = payload.prompt_entries || promptEntries;
+              renderPrompts();
+              promptStatus.textContent = "Image attached.";
+            } catch {
+              promptStatus.textContent = "Image upload failed.";
+            } finally {
+              input.value = "";
+            }
+          });
+
+          removeButton.addEventListener("click", async () => {
+            const promptId = card.dataset.promptId;
+            if (!promptId) return;
+            promptStatus.textContent = "Removing image...";
+            try {
+              const response = await fetch("/api/prompts/reference/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json;charset=UTF-8" },
+                body: JSON.stringify({ prompt_id: promptId }),
+              });
+              if (!response.ok) throw new Error("delete failed");
+              const payload = await response.json();
+              promptEntries = payload.prompt_entries || promptEntries;
+              renderPrompts();
+              promptStatus.textContent = "Image removed.";
+            } catch {
+              promptStatus.textContent = "Could not remove the image.";
+            }
           });
         }
 
@@ -2320,6 +2445,14 @@ def build_handler(controller):
             if request_path in {"/screen-preview.jpg", "/screen-preview.png"}:
                 self._serve_screen_preview()
                 return
+            if request_path.startswith("/prompt-references/"):
+                filename = request_path[len("/prompt-references/") :]
+                image_path = get_prompt_reference_image(controller, filename)
+                if image_path is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
+                    return
+                self._serve_image_path(image_path)
+                return
             if request_path == "/api/wifi/status":
                 status = getattr(controller, "setup_portal_status", None)
                 if status is None:
@@ -2491,6 +2624,59 @@ def build_handler(controller):
                     self.send_error(HTTPStatus.BAD_REQUEST, f"Unknown button: {name}")
                     return
                 self._send_json({"ok": True, "button": name})
+                return
+            if self.path == "/api/prompts/reference":
+                payload = self._read_json_body()
+                if payload is None:
+                    return
+                attach = getattr(controller, "set_prompt_reference_image", None)
+                if attach is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Prompt images unavailable")
+                    return
+                prompt_id = str(payload.get("prompt_id") or "").strip()
+                data_url = str(payload.get("image") or "")
+                if not prompt_id or not data_url:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing prompt_id or image")
+                    return
+                try:
+                    image_bytes = decode_image_data_url(data_url)
+                except ValueError as exc:
+                    self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                try:
+                    filename = attach(prompt_id, image_bytes)
+                except ValueError as exc:
+                    self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                    return
+                self._send_json(
+                    {
+                        "ok": True,
+                        "prompt_id": prompt_id,
+                        "reference_image": filename,
+                        "prompt_entries": controller.get_prompt_entries(),
+                    }
+                )
+                return
+            if self.path == "/api/prompts/reference/delete":
+                payload = self._read_json_body()
+                if payload is None:
+                    return
+                clear = getattr(controller, "clear_prompt_reference_image", None)
+                if clear is None:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Prompt images unavailable")
+                    return
+                prompt_id = str(payload.get("prompt_id") or "").strip()
+                if not prompt_id:
+                    self.send_error(HTTPStatus.BAD_REQUEST, "Missing prompt_id")
+                    return
+                removed = clear(prompt_id)
+                self._send_json(
+                    {
+                        "ok": removed,
+                        "prompt_id": prompt_id,
+                        "prompt_entries": controller.get_prompt_entries(),
+                    }
+                )
                 return
             if self.path == "/api/wifi/connect":
                 payload = self._read_json_body()

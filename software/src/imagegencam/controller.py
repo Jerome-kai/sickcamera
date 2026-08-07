@@ -881,7 +881,12 @@ class ImageGenCamController:
     def get_prompt_entries(self) -> list[dict[str, str]]:
         with self.state_lock:
             return [
-                {"id": prompt_id, "title": entry["title"], "body": entry["body"]}
+                {
+                    "id": prompt_id,
+                    "title": entry["title"],
+                    "body": entry["body"],
+                    "reference_image": entry.get("reference_image", ""),
+                }
                 for prompt_id, entry in self.prompt_entries.items()
             ]
 
@@ -1053,6 +1058,89 @@ class ImageGenCamController:
         self.magic_history = self.magic_history_store.mark_promoted(entry_id, prompt_id)
         return self.get_magic_history_entries()
 
+    # -- prompt reference images ---------------------------------------
+
+    @property
+    def prompt_reference_root(self) -> Path:
+        return self.project_root / "data" / "prompt-references"
+
+    def prompt_reference_path(self, prompt_id: str) -> Path | None:
+        """On-disk reference image for a prompt, when it has one that exists."""
+        entry = self.prompt_entries.get(prompt_id)
+        if not entry:
+            return None
+        filename = str(entry.get("reference_image") or "").strip()
+        if not filename:
+            return None
+        path = self.prompt_reference_root / filename
+        return path if path.is_file() else None
+
+    def _keep_existing_reference_images(self, prompts: object) -> object:
+        """Preserve attachments across saves that only carry title and body.
+
+        The prompt editor posts the text fields alone, so without this an edit
+        to a prompt's wording would silently drop its reference image.
+        """
+        if not isinstance(prompts, list):
+            return prompts
+        merged: list[object] = []
+        for entry in prompts:
+            if isinstance(entry, dict) and "reference_image" not in entry:
+                existing = self.prompt_entries.get(str(entry.get("id") or ""), {})
+                reference_image = existing.get("reference_image", "")
+                if reference_image:
+                    entry = {**entry, "reference_image": reference_image}
+            merged.append(entry)
+        return merged
+
+    def set_prompt_reference_image(
+        self, prompt_id: str, image_bytes: bytes, *, suffix: str = ".jpg"
+    ) -> str:
+        """Attach a reference image to a prompt and return its filename.
+
+        The upload is decoded and re-encoded so a corrupt or hostile file fails
+        here rather than at generation time, and downscaled because the model
+        only needs the reference for style, not for detail.
+        """
+        if prompt_id not in self.prompt_entries:
+            raise ValueError(f"Unknown prompt: {prompt_id}")
+        try:
+            with Image.open(BytesIO(image_bytes)) as uploaded:
+                image = ImageOps.exif_transpose(uploaded).convert("RGB")
+        except Exception as exc:
+            raise ValueError("That file is not a readable image.") from exc
+
+        image.thumbnail(self.generation_input_size, Image.LANCZOS)
+        self.prompt_reference_root.mkdir(parents=True, exist_ok=True)
+        filename = f"{prompt_id}.jpg"
+        target = self.prompt_reference_root / filename
+        image.save(target, format="JPEG", quality=88)
+
+        entries = self.get_prompt_entries()
+        for entry in entries:
+            if entry["id"] == prompt_id:
+                entry["reference_image"] = filename
+        self.update_prompt_entries(entries)
+        logger.info("Attached reference image to prompt %r", prompt_id)
+        return filename
+
+    def clear_prompt_reference_image(self, prompt_id: str) -> bool:
+        entry = self.prompt_entries.get(prompt_id)
+        if not entry or not entry.get("reference_image"):
+            return False
+        path = self.prompt_reference_root / str(entry["reference_image"])
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not delete the reference image for %r", prompt_id)
+
+        entries = self.get_prompt_entries()
+        for item in entries:
+            if item["id"] == prompt_id:
+                item["reference_image"] = ""
+        self.update_prompt_entries(entries)
+        return True
+
     def update_prompts(self, prompts: dict[str, str]) -> dict[str, str]:
         cleaned = self.prompt_store.save(prompts)
         updated_entries = [
@@ -1067,10 +1155,15 @@ class ImageGenCamController:
         return cleaned
 
     def update_prompt_entries(self, prompts: object) -> list[dict[str, str]]:
+        prompts = self._keep_existing_reference_images(prompts)
         cleaned_entries = self.prompt_store.save_entries(prompts)
         with self.state_lock:
             self.prompt_entries = {
-                button: {"title": entry["title"], "body": entry["body"]}
+                button: {
+                    "title": entry["title"],
+                    "body": entry["body"],
+                    "reference_image": entry.get("reference_image", ""),
+                }
                 for button, entry in cleaned_entries.items()
             }
             self.prompt_order = tuple(self.prompt_entries.keys())
@@ -2107,8 +2200,18 @@ class ImageGenCamController:
                 outline=(255, 255, 255, 232),
             )
             draw = ImageDraw.Draw(screen)
-            label = self._truncate_text_pixels(entry["title"], item_font, box[2] - box[0] - 24)
+            # Prompts carrying a reference image get a marker, so the extra
+            # image being sent is visible from the camera itself.
+            has_reference = bool(entry.get("reference_image"))
+            label_width = box[2] - box[0] - (40 if has_reference else 24)
+            label = self._truncate_text_pixels(entry["title"], item_font, label_width)
             draw.text((box[0] + 12, box[1] + 10), label, font=item_font, fill=(0, 0, 0))
+            if has_reference:
+                marker = (box[2] - 26, box[1] + 13, box[2] - 12, box[1] + 25)
+                draw.rounded_rectangle(marker, radius=3, outline=(0, 0, 0), width=1)
+                draw.ellipse(
+                    (marker[0] + 3, marker[1] + 3, marker[0] + 7, marker[1] + 7), fill=(0, 0, 0)
+                )
             y += 44
 
         self._render_to_display(screen.convert("RGB"))
@@ -3146,6 +3249,7 @@ class ImageGenCamController:
 
         prompt_button = self.prompt_order[self.selected_prompt_index]
         prompt_entry = self.prompt_entries[prompt_button]
+        reference_path = self.prompt_reference_path(prompt_button)
         self._prepare_capture_feedback(display_frame)
         self.capture_queue.put(
             CaptureRequest(
@@ -3153,6 +3257,7 @@ class ImageGenCamController:
                 prompt_title=prompt_entry["title"],
                 prompt_body=prompt_entry["body"],
                 source_image=source_frame,
+                reference_paths=(reference_path,) if reference_path else (),
             )
         )
 

@@ -212,7 +212,7 @@ def _clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
 
 def _default_prompt_map() -> dict[str, dict[str, str]]:
     return {
-        entry["id"]: {"title": entry["title"], "body": entry["body"]}
+        entry["id"]: {"title": entry["title"], "body": entry["body"], "reference_image": ""}
         for entry in DEFAULT_PROMPT_ENTRIES
     }
 
@@ -242,6 +242,19 @@ def _normalize_prompt_title(value: object) -> str:
 def _normalize_prompt_body(value: object) -> str:
     cleaned = str(value or "").strip()
     return cleaned or DEFAULT_NEW_PROMPT_BODY
+
+
+def _normalize_prompt_reference_image(value: object) -> str:
+    """Bare filename of a prompt's reference image, or "" when it has none.
+
+    Only the basename is kept so a hand-edited prompts.json cannot point the
+    camera at a file outside the reference directory.
+    """
+    cleaned = str(value or "").strip().replace("\\", "/")
+    cleaned = cleaned.rsplit("/", 1)[-1]
+    if cleaned in {"", ".", ".."}:
+        return ""
+    return re.sub(r"[^A-Za-z0-9._-]+", "", cleaned)[:128]
 
 
 def _normalize_camera_username(value: object) -> str:
@@ -280,6 +293,7 @@ def normalize_prompt_entries(
                         "id": value.get("id", key),
                         "title": value.get("title", DEFAULT_NEW_PROMPT_TITLE),
                         "body": value.get("body", DEFAULT_NEW_PROMPT_BODY),
+                        "reference_image": value.get("reference_image", ""),
                     }
                 )
             else:
@@ -302,6 +316,7 @@ def normalize_prompt_entries(
         cleaned[prompt_id] = {
             "title": _normalize_prompt_title(entry.get("title")),
             "body": _normalize_prompt_body(entry.get("body")),
+            "reference_image": _normalize_prompt_reference_image(entry.get("reference_image")),
         }
 
     if not cleaned and ensure_defaults_when_empty:
