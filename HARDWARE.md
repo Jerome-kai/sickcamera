@@ -283,7 +283,14 @@ loop, and needs neither SSH nor the physical buttons:
    `http://<hostname>.local`. The camera's display shows its new address too.
 
 If the network is wrong or the password is mistyped, the camera brings its hotspot back
-by itself, so it never becomes unreachable. The same **Wi-Fi** tab also works normally
+by itself, so it never becomes unreachable.
+
+The camera does not sit in setup mode forever waiting to be configured. Every
+`WIFI_SETUP_RETRY_SECONDS` (10 minutes by default) it drops the hotspot, rescans, and
+gives NetworkManager `WIFI_SETUP_REJOIN_SECONDS` to rejoin a known network — so a router
+switched on late, or a phone hotspot re-enabled after boot, is picked up on its own. If
+nothing answers, the hotspot comes straight back. Retries are skipped while somebody has
+the setup page open, so the hotspot is never pulled out from under a half-filled form. The same **Wi-Fi** tab also works normally
 once the camera is online, which is the easy way to move it between a home network and
 a phone hotspot.
 

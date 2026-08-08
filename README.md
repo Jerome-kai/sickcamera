@@ -162,6 +162,11 @@ network and open `http://<camera-hostname>.local`; the display shows the
 camera's address as well. Pick the wrong network and it simply brings its own
 hotspot back so you can try again.
 
+You do not have to configure it at all, either: every ten minutes the camera
+puts its hotspot away and checks whether a network it already knows has come
+back. Switch your router on late, or re-enable your phone hotspot after the
+camera booted, and it rejoins by itself.
+
 No terminal and no buttons are needed for any of this, which makes the camera
 safe to hand to someone else. See [HARDWARE.md](HARDWARE.md) for the settings
 that control it.

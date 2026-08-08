@@ -256,6 +256,12 @@ class ImageGenCamController:
         self.setup_portal_networks: list[WifiNetwork] = []
         self.setup_portal_message = ""
         self.setup_grace_seconds = float(os.environ.get("WIFI_SETUP_GRACE_SECONDS", "45"))
+        # A hotspot cannot scan or auto-join, so the camera would sit in setup
+        # mode forever if the owner's network only came back after boot. These
+        # control how often it drops the hotspot to look again.
+        self.setup_retry_seconds = float(os.environ.get("WIFI_SETUP_RETRY_SECONDS", "600"))
+        self.setup_rejoin_seconds = float(os.environ.get("WIFI_SETUP_REJOIN_SECONDS", "40"))
+        self.setup_portal_last_activity = 0.0
         self.setup_portal_enabled = (
             os.environ.get("WIFI_SETUP_PORTAL", "1").strip().lower() not in {"0", "false", "no"}
         )
@@ -3101,16 +3107,71 @@ class ImageGenCamController:
         logger.info(
             "No Wi-Fi after %.0fs; publishing the setup hotspot", self.setup_grace_seconds
         )
-        self.open_setup_portal()
+        if self.open_setup_portal():
+            self._setup_portal_retry_loop()
 
-    def open_setup_portal(self) -> bool:
-        # Capture the network list first: the radio cannot scan reliably once
-        # it is serving a hotspot, and this list is what the phone will pick from.
+    def _setup_portal_retry_loop(self) -> None:
+        """Periodically drop the hotspot to see if a known network is back.
+
+        Without this the camera stays in setup mode until somebody configures
+        it, even if the owner simply switched their router on a minute late.
+        """
+        while self.running and self.setup_portal_active:
+            wake_at = time.monotonic() + self.setup_retry_seconds
+            while self.running and time.monotonic() < wake_at:
+                time.sleep(2.0)
+            if not self.running or not self.setup_portal_active:
+                return
+            if self.wifi_connecting:
+                continue
+            # Somebody is on the setup page right now; taking the hotspot away
+            # would drop them mid-form.
+            idle_seconds = time.monotonic() - self.setup_portal_last_activity
+            if self.setup_portal_last_activity and idle_seconds < 120:
+                continue
+            self._retry_known_networks()
+
+    def _retry_known_networks(self) -> bool:
+        """Take the hotspot down briefly and let NetworkManager try to rejoin."""
+        logger.info("Dropping the setup hotspot to look for known networks")
+        self.setup_portal_message = "Looking for known networks..."
+        self.last_drawn_mode = None
+        self.close_setup_portal()
+
+        # Scanning is only possible with the hotspot down, so refresh the list
+        # the picker offers while the radio is free.
         try:
             self.setup_portal_networks = self.wifi_manager.scan_networks()
         except Exception:
-            logger.exception("Wi-Fi scan before setup hotspot failed")
-            self.setup_portal_networks = self.wifi_manager.list_saved_networks()
+            logger.exception("Wi-Fi scan during the retry window failed")
+
+        step = min(1.0, max(0.05, self.setup_rejoin_seconds / 4))
+        deadline = time.monotonic() + self.setup_rejoin_seconds
+        while self.running and time.monotonic() < deadline:
+            if self.setup_access_point.is_online():
+                self.setup_portal_message = f"Connected to {self._get_wifi_ssid()}"
+                logger.info("Rejoined a known network; setup hotspot stays down")
+                self.last_drawn_mode = None
+                return True
+            time.sleep(step)
+
+        self.setup_portal_message = ""
+        self.open_setup_portal(rescan=False)
+        return False
+
+    def note_setup_portal_activity(self) -> None:
+        """Record that somebody is using the setup page."""
+        self.setup_portal_last_activity = time.monotonic()
+
+    def open_setup_portal(self, *, rescan: bool = True) -> bool:
+        # Capture the network list first: the radio cannot scan reliably once
+        # it is serving a hotspot, and this list is what the phone will pick from.
+        if rescan:
+            try:
+                self.setup_portal_networks = self.wifi_manager.scan_networks()
+            except Exception:
+                logger.exception("Wi-Fi scan before setup hotspot failed")
+                self.setup_portal_networks = self.wifi_manager.list_saved_networks()
         if not self.setup_access_point.start():
             self.setup_portal_message = "Could not start the setup hotspot."
             return False
@@ -3178,6 +3239,13 @@ class ImageGenCamController:
         ssid = str(ssid).strip()
         if not ssid:
             return {"ok": False, "message": "Choose a network first."}
+        # This value becomes an argv element of a root nmcli call, and the web
+        # UI has no authentication, so refuse anything nmcli could read as an
+        # option or that no real network could be named.
+        if ssid.startswith("-") or len(ssid.encode("utf-8")) > 32 or any(
+            character < " " for character in ssid
+        ):
+            return {"ok": False, "message": "That network name is not valid."}
         if self.wifi_connecting:
             return {"ok": False, "message": "Already connecting; give it a moment."}
 

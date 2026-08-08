@@ -2148,6 +2148,12 @@ def get_generated_image_by_relative_path(controller, relative_path: str) -> Path
 
 def build_handler(controller):
     class PromptHandler(BaseHTTPRequestHandler):
+        def _note_wifi_activity(self) -> None:
+            """Tell the controller the setup page is in use, so it defers retries."""
+            note = getattr(controller, "note_setup_portal_activity", None)
+            if note is not None:
+                note()
+
         def _read_request_body(self) -> bytes | None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -2301,6 +2307,7 @@ def build_handler(controller):
                 if status is None:
                     self.send_error(HTTPStatus.NOT_FOUND, "Wi-Fi setup unavailable")
                     return
+                self._note_wifi_activity()
                 self._send_json(status())
                 return
             if request_path == "/api/wifi/networks":
@@ -2308,6 +2315,7 @@ def build_handler(controller):
                 if listing is None:
                     self.send_error(HTTPStatus.NOT_FOUND, "Wi-Fi setup unavailable")
                     return
+                self._note_wifi_activity()
                 self._send_json({"networks": listing()})
                 return
             if request_path == "/manifest.webmanifest":
@@ -2478,6 +2486,7 @@ def build_handler(controller):
                 if not ssid:
                     self.send_error(HTTPStatus.BAD_REQUEST, "Missing ssid")
                     return
+                self._note_wifi_activity()
                 self._send_json(connect(ssid, str(payload.get("password") or "")))
                 return
             if self.path == "/api/images/delete":

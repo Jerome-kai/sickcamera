@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import types
 import unittest
 from unittest.mock import patch
 
@@ -92,6 +93,155 @@ class SetupAccessPointTests(unittest.TestCase):
     def test_short_passwords_fall_back_to_the_default(self) -> None:
         with patch.dict("os.environ", {"WIFI_SETUP_AP_PASSWORD": "short"}):
             self.assertEqual(SetupAccessPoint(ssid="x").password, "takeaphoto")
+
+
+class WebConnectValidationTests(unittest.TestCase):
+    """The SSID reaches a root nmcli argv, and the web UI has no auth."""
+
+    def setUp(self) -> None:
+        from imagegencam.controller import ImageGenCamController
+
+        self.connect = ImageGenCamController.begin_wifi_connect_from_web
+        self.stub = object()
+
+    def _reject(self, ssid: str) -> dict:
+        return self.connect(self.stub, ssid)
+
+    def test_rejects_an_option_like_ssid(self) -> None:
+        self.assertFalse(self._reject("--help")["ok"])
+        self.assertFalse(self._reject("-x")["ok"])
+
+    def test_rejects_control_characters(self) -> None:
+        self.assertFalse(self._reject("home\nwifi")["ok"])
+
+    def test_rejects_an_over_length_ssid(self) -> None:
+        self.assertFalse(self._reject("a" * 33)["ok"])
+
+    def test_rejects_an_empty_ssid(self) -> None:
+        self.assertFalse(self._reject("   ")["ok"])
+
+
+class _FakeAccessPoint:
+    def __init__(self, online_after: int = 0) -> None:
+        self.online_after = online_after
+        self.online_checks = 0
+        self.started = 0
+        self.stopped = 0
+        self.active = True
+
+    def is_online(self) -> bool:
+        self.online_checks += 1
+        return self.online_checks > self.online_after
+
+    def is_active(self) -> bool:
+        return self.active
+
+    def start(self) -> bool:
+        self.started += 1
+        self.active = True
+        return True
+
+    def stop(self) -> None:
+        self.stopped += 1
+        self.active = False
+
+
+class _RetryStub:
+    """Stand-in for the controller so the retry cycle runs without hardware."""
+
+    def __init__(self, access_point: _FakeAccessPoint) -> None:
+        from threading import Lock
+
+        self.running = True
+        self.setup_access_point = access_point
+        self.setup_portal_active = True
+        self.setup_portal_message = ""
+        self.setup_portal_networks = []
+        self.setup_rejoin_seconds = 0.2
+        self.setup_retry_seconds = 0.1
+        self.setup_portal_last_activity = 0.0
+        self.wifi_connecting = False
+        self.last_drawn_mode = None
+        self.state_lock = Lock()
+        self.state = types.SimpleNamespace(mode="preview", status_message="")
+        self.wifi_manager = types.SimpleNamespace(
+            scan_networks=lambda: [], list_saved_networks=lambda: []
+        )
+
+    def _get_wifi_ssid(self) -> str:
+        return "Home WiFi"
+
+    def close_setup_portal(self):
+        from imagegencam.controller import ImageGenCamController
+
+        return ImageGenCamController.close_setup_portal(self)
+
+    def open_setup_portal(self, *, rescan: bool = True):
+        from imagegencam.controller import ImageGenCamController
+
+        return ImageGenCamController.open_setup_portal(self, rescan=rescan)
+
+
+class SetupPortalRetryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from imagegencam.controller import ImageGenCamController
+
+        self.retry = ImageGenCamController._retry_known_networks
+
+    def test_a_recovered_network_keeps_the_hotspot_down(self) -> None:
+        access_point = _FakeAccessPoint(online_after=0)
+        stub = _RetryStub(access_point)
+
+        self.assertTrue(self.retry(stub))
+
+        self.assertEqual(access_point.stopped, 1)
+        self.assertEqual(access_point.started, 0)
+        self.assertFalse(stub.setup_portal_active)
+        self.assertIn("Home WiFi", stub.setup_portal_message)
+
+    def test_the_hotspot_returns_when_nothing_is_reachable(self) -> None:
+        # Never reports online, so the rejoin window must expire.
+        access_point = _FakeAccessPoint(online_after=10_000)
+        stub = _RetryStub(access_point)
+
+        self.assertFalse(self.retry(stub))
+
+        self.assertEqual(access_point.stopped, 1)
+        self.assertEqual(access_point.started, 1)
+        self.assertTrue(stub.setup_portal_active)
+
+    def test_the_retry_window_refreshes_the_offered_networks(self) -> None:
+        access_point = _FakeAccessPoint(online_after=10_000)
+        stub = _RetryStub(access_point)
+        stub.wifi_manager.scan_networks = lambda: ["Home WiFi"]
+
+        self.retry(stub)
+
+        self.assertEqual(stub.setup_portal_networks, ["Home WiFi"])
+
+    def test_a_failed_scan_does_not_abort_the_retry(self) -> None:
+        access_point = _FakeAccessPoint(online_after=10_000)
+        stub = _RetryStub(access_point)
+
+        def boom():
+            raise OSError("nmcli exploded")
+
+        stub.wifi_manager.scan_networks = boom
+
+        self.assertFalse(self.retry(stub))
+        self.assertTrue(stub.setup_portal_active)
+
+
+class SetupPortalActivityTests(unittest.TestCase):
+    def test_activity_defers_the_next_retry(self) -> None:
+        from imagegencam.controller import ImageGenCamController
+
+        stub = _RetryStub(_FakeAccessPoint())
+        self.assertEqual(stub.setup_portal_last_activity, 0.0)
+
+        ImageGenCamController.note_setup_portal_activity(stub)
+
+        self.assertGreater(stub.setup_portal_last_activity, 0.0)
 
 
 class CurrentAddressTests(unittest.TestCase):
