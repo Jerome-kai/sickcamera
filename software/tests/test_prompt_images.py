@@ -198,6 +198,34 @@ class PromptReferenceEndpointTests(unittest.TestCase):
         self.assertEqual(controller.attached, [("prompt-1", controller.attached[0][1])])
         self.assertEqual(controller.cleared, ["prompt-1"])
 
+    def test_accepts_a_body_larger_than_the_default_post_ceiling(self) -> None:
+        """A phone photo dwarfs MAX_POST_BODY_BYTES; the endpoint must not 413."""
+        from imagegencam.web import MAX_POST_BODY_BYTES
+
+        buffer = BytesIO()
+        # Noise so JPEG cannot compress it down under the default ceiling.
+        image = Image.new("RGB", (900, 900))
+        image.putdata([(index % 256, (index * 7) % 256, (index * 13) % 256) for index in range(900 * 900)])
+        image.save(buffer, format="JPEG", quality=95)
+        photo = buffer.getvalue()
+        data_url = "data:image/jpeg;base64," + base64.b64encode(photo).decode()
+        self.assertGreater(len(data_url), MAX_POST_BODY_BYTES)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            controller = _PromptImageController(Path(tmp))
+            server = WebServerThread(controller, "127.0.0.1", 0)
+            server.start()
+            try:
+                port = server.server.server_address[1]
+                status, payload = self._post(
+                    port, "/api/prompts/reference", {"prompt_id": "prompt-1", "image": data_url}
+                )
+            finally:
+                server.stop()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["reference_image"], "prompt-1.jpg")
+
     def test_bad_requests_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             controller = _PromptImageController(Path(tmp))

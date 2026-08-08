@@ -1039,6 +1039,8 @@ def get_or_create_thumbnail(controller, relative_path: str) -> Path | None:
 # A reference image only needs to carry style, so this ceiling is generous
 # while still rejecting an accidental multi-megapixel upload outright.
 MAX_REFERENCE_IMAGE_BYTES = 12 * 1024 * 1024
+# The JSON body carrying it: base64 costs a third on top, plus the envelope.
+MAX_REFERENCE_UPLOAD_BYTES = MAX_REFERENCE_IMAGE_BYTES * 4 // 3 + 8192
 
 
 def decode_image_data_url(data_url: str) -> bytes:
@@ -2291,7 +2293,7 @@ def build_handler(controller):
             if note is not None:
                 note()
 
-        def _read_request_body(self) -> bytes | None:
+        def _read_request_body(self, max_bytes: int = MAX_POST_BODY_BYTES) -> bytes | None:
             try:
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
@@ -2303,13 +2305,13 @@ def build_handler(controller):
             if length < 0:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid Content-Length")
                 return None
-            if length > MAX_POST_BODY_BYTES:
+            if length > max_bytes:
                 self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Request body is too large")
                 return None
             return self.rfile.read(length)
 
-        def _read_json_body(self) -> dict[str, object] | None:
-            raw_body = self._read_request_body()
+        def _read_json_body(self, max_bytes: int = MAX_POST_BODY_BYTES) -> dict[str, object] | None:
+            raw_body = self._read_request_body(max_bytes)
             if raw_body is None:
                 return None
             try:
@@ -2626,7 +2628,9 @@ def build_handler(controller):
                 self._send_json({"ok": True, "button": name})
                 return
             if self.path == "/api/prompts/reference":
-                payload = self._read_json_body()
+                # Photos are the one thing a phone posts that dwarfs the default
+                # body ceiling; base64 adds a further third on top of the file.
+                payload = self._read_json_body(MAX_REFERENCE_UPLOAD_BYTES)
                 if payload is None:
                     return
                 attach = getattr(controller, "set_prompt_reference_image", None)
