@@ -50,6 +50,32 @@ class PromptReferenceNormalizationTests(unittest.TestCase):
         self.assertEqual(entries["dots"]["reference_image"], "")
 
 
+class PromptStorePersistenceTests(unittest.TestCase):
+    def test_reference_image_survives_a_save_and_reload(self) -> None:
+        from imagegencam.config import PromptStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prompts.json"
+            store = PromptStore(path)
+            store.save_entries(
+                [{"id": "goblin", "title": "Goblin", "body": "body", "reference_image": "goblin.jpg"}]
+            )
+
+            reloaded = PromptStore(path).load_entries()
+
+        self.assertEqual(reloaded["goblin"]["reference_image"], "goblin.jpg")
+
+    def test_prompts_without_an_image_stay_text_only_on_disk(self) -> None:
+        from imagegencam.config import PromptStore
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prompts.json"
+            PromptStore(path).save_entries([{"id": "plain", "title": "Plain", "body": "body"}])
+            written = json.loads(path.read_text())
+
+        self.assertEqual(written, [{"id": "plain", "title": "Plain", "body": "body"}])
+
+
 class DataUrlDecodingTests(unittest.TestCase):
     def test_decodes_a_base64_image(self) -> None:
         self.assertTrue(decode_image_data_url(_png_data_url()).startswith(b"\x89PNG"))

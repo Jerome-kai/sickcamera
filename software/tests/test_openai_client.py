@@ -144,6 +144,49 @@ class ChatModeEditTests(unittest.TestCase):
         self.assertEqual(content[1]["type"], "image_url")
         self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/"))
 
+    def test_chat_mode_sends_a_prompt_reference_image_alongside_the_photo(self) -> None:
+        response = _dict_to_namespace(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "done",
+                            "images": [
+                                {"type": "image_url", "image_url": {"url": _data_url(_png_bytes())}}
+                            ],
+                        }
+                    }
+                ]
+            }
+        )
+        editor = OpenAIImageEditor(model="google/gemini-2.5-flash-image", api_mode="chat")
+        completions = _FakeChatCompletions(response)
+        editor._client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=completions))
+        editor._client_config = ("key", None)
+        tmp = Path(tempfile.mkdtemp())
+        source = tmp / "photo.jpg"
+        source.write_bytes(_png_bytes())
+        reference = tmp / "prompt-1.jpg"
+        reference.write_bytes(_png_bytes())
+        output = tmp / "result.jpg"
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "key", "OPENAI_BASE_URL": ""}):
+            editor.edit_image(
+                source_path=source,
+                prompt="turn me into a goblin",
+                output_path=output,
+                reference_paths=[reference],
+            )
+
+        content = completions.captured_kwargs["messages"][0]["content"]
+        image_parts = [part for part in content if part["type"] == "image_url"]
+        self.assertEqual(len(image_parts), 2)
+        # The photo stays first so the model treats it as the subject.
+        self.assertTrue(all(part["image_url"]["url"].startswith("data:image/") for part in image_parts))
+        self.assertIn("reference", content[0]["text"].lower())
+        self.assertTrue(output.exists())
+
     def test_chat_mode_reads_image_from_content_parts(self) -> None:
         response = {
             "choices": [

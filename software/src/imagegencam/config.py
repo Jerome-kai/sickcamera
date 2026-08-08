@@ -484,7 +484,14 @@ class PromptStore:
     def save_entries(self, prompts: object) -> dict[str, dict[str, str]]:
         cleaned = normalize_prompt_entries(prompts)
         serializable = [
-            {"id": prompt_id, "title": entry["title"], "body": entry["body"]}
+            {
+                "id": prompt_id,
+                "title": entry["title"],
+                "body": entry["body"],
+                # Written only when set, so prompts.json stays byte-identical to
+                # what a text-only build produces until an image is attached.
+                **({"reference_image": entry["reference_image"]} if entry.get("reference_image") else {}),
+            }
             for prompt_id, entry in cleaned.items()
         ]
         with self._lock:
