@@ -16,6 +16,7 @@ from imagegencam.web import (
     get_latest_generated_path,
     get_or_create_thumbnail,
     json_for_inline_script,
+    read_project_asset,
     render_page,
 )
 
@@ -445,6 +446,57 @@ class LatestGeneratedPathTests(unittest.TestCase):
             self.assertEqual(html.lower().count("</script>"), 2)
             self.assertNotIn("</script><script>window.evil = true", html)
             self.assertIn("\\u003c/script\\u003e", html)
+
+
+class ProjectAssetTests(unittest.TestCase):
+    def _project(self, tmp: str) -> Path:
+        root = Path(tmp)
+        (root / "assets" / "fonts").mkdir(parents=True)
+        (root / "assets" / "fonts" / "Orbitron-Regular.ttf").write_bytes(b"font-bytes")
+        (root / ".env").write_text("OPENAI_API_KEY=sk-secret\n", encoding="utf-8")
+        (root / "data").mkdir()
+        (root / "data" / "prompts.json").write_text("[]\n", encoding="utf-8")
+        return root
+
+    def test_serves_a_real_asset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+
+            asset = read_project_asset(root, "/assets/fonts/Orbitron-Regular.ttf")
+
+            self.assertIsNotNone(asset)
+            self.assertEqual(asset[0], b"font-bytes")
+
+    def test_refuses_to_climb_out_of_the_assets_directory(self) -> None:
+        # http.server hands us the raw request path, so `..` arrives intact.
+        # Before this was anchored, the .env file -- and the API key in it --
+        # was readable by anyone who could reach the web UI.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+
+            for request_path in (
+                "/assets/../.env",
+                "/assets/../data/prompts.json",
+                "/assets/fonts/../../.env",
+                "/assets/%2e%2e/.env",
+                "/assets/..%2f.env",
+            ):
+                with self.subTest(request_path=request_path):
+                    self.assertIsNone(read_project_asset(root, request_path))
+
+    def test_refuses_paths_outside_the_assets_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+
+            self.assertIsNone(read_project_asset(root, "/.env"))
+            self.assertIsNone(read_project_asset(root, "/data/prompts.json"))
+
+    def test_refuses_a_symlink_that_escapes_the_assets_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._project(tmp)
+            (root / "assets" / "leak").symlink_to(root / ".env")
+
+            self.assertIsNone(read_project_asset(root, "/assets/leak"))
 
 
 if __name__ == "__main__":

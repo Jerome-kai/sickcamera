@@ -2066,16 +2066,27 @@ def build_app_icon_bytes(project_root: Path) -> bytes:
 
 
 def read_project_asset(project_root: Path, request_path: str) -> tuple[bytes, str] | None:
-    relative = request_path.lstrip("/")
+    """Serve a static file, and only ever one that lives under ``assets/``.
+
+    The request path is raw client input -- http.server does not collapse ``..``
+    for us -- so the check is anchored to the assets directory and both sides
+    are resolved before comparing. Allowing the whole project root here would
+    make ``GET /assets/../.env`` hand out the API key.
+    """
+    assets_root = (project_root / "assets").resolve()
+    relative = unquote(request_path).lstrip("/")
+    if not relative.startswith("assets/"):
+        return None
     asset_path = (project_root / relative).resolve()
     try:
-        asset_path.relative_to(project_root)
+        asset_path.relative_to(assets_root)
     except ValueError:
         return None
     if not asset_path.is_file():
         return None
     content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
     return asset_path.read_bytes(), content_type
+
 
 def is_generated_image_file(path: Path) -> bool:
     return (
