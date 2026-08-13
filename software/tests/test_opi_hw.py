@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -86,6 +88,85 @@ class ImportSurfaceTests(unittest.TestCase):
 
         self.assertTrue(hasattr(opi_hw.DisplayHATMini, "BUTTON_SHUTTER"))
         self.assertIs(opi_hw.Picamera2, opi_hw.UsbCamera)
+
+
+class _FakeCapture:
+    """Minimal cv2.VideoCapture stand-in."""
+
+    def __init__(self, opened: bool, frames: bool = True) -> None:
+        self._opened = opened
+        self._frames = frames
+        self.released = False
+
+    def isOpened(self) -> bool:
+        return self._opened
+
+    def set(self, *args) -> None:
+        return None
+
+    def read(self):
+        return (self._frames, object() if self._frames else None)
+
+    def release(self) -> None:
+        self.released = True
+
+
+def _fake_cv2(captures: list) -> types.ModuleType:
+    module = types.ModuleType("cv2")
+    module.CAP_V4L2 = 200
+    for name in ("CAP_PROP_FOURCC", "CAP_PROP_FRAME_WIDTH", "CAP_PROP_FRAME_HEIGHT",
+                 "CAP_PROP_FPS", "CAP_PROP_BUFFERSIZE"):
+        setattr(module, name, 0)
+    module.VideoWriter_fourcc = lambda *args: 0
+    module.VideoCapture = lambda index, api=None: captures.pop(0)
+    return module
+
+
+class CameraStartRetryTests(unittest.TestCase):
+    """A camera that is still enumerating must not kill the service."""
+
+    def _start(self, captures: list, timeout: str = "5"):
+        from imagegencam.opi_hw import UsbCamera
+
+        camera = UsbCamera()
+        module = _fake_cv2(captures)
+        with mock.patch.dict(sys.modules, {"cv2": module}), \
+                mock.patch.dict(os.environ, {"CAMERA_OPEN_TIMEOUT_SECONDS": timeout}), \
+                mock.patch("imagegencam.opi_hw.time.sleep", lambda _seconds: None):
+            camera.start()
+        return camera
+
+    def test_waits_for_a_device_that_appears_late(self) -> None:
+        late = _FakeCapture(opened=True)
+        camera = self._start([_FakeCapture(opened=False), _FakeCapture(opened=False), late])
+
+        self.assertIs(camera._capture, late)
+
+    def test_retries_a_device_that_opens_but_yields_no_frames(self) -> None:
+        good = _FakeCapture(opened=True)
+        camera = self._start([_FakeCapture(opened=True, frames=False), good])
+
+        self.assertIs(camera._capture, good)
+
+    def test_gives_up_once_the_window_closes(self) -> None:
+        from imagegencam.opi_hw import UsbCamera
+
+        camera = UsbCamera()
+        # Always-failing device, with a window that has already expired.
+        module = _fake_cv2([_FakeCapture(opened=False) for _ in range(10)])
+        with mock.patch.dict(sys.modules, {"cv2": module}), \
+                mock.patch.dict(os.environ, {"CAMERA_OPEN_TIMEOUT_SECONDS": "0"}), \
+                mock.patch("imagegencam.opi_hw.time.sleep", lambda _seconds: None):
+            with self.assertRaises(RuntimeError) as raised:
+                camera.start()
+
+        self.assertIn("failed to open", str(raised.exception))
+
+    def test_failed_attempts_release_their_handle(self) -> None:
+        first = _FakeCapture(opened=False)
+        self._start([first, _FakeCapture(opened=True)])
+
+        self.assertTrue(first.released)
 
 
 class _FakeOutputs:

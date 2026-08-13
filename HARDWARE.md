@@ -311,6 +311,7 @@ rules from `install_service.sh` — rerun it after upgrading an older install.
 | Buttons never register | pull-up bias needs a modern kernel (5.15+ image); check `gpioinfo` shows the lines as unused; worst case add external 10kΩ pull-ups to 3.3V |
 | UI has black side bars | expected (4:3 UI on a 3:2 panel); `DISPLAY_FIT=stretch` to fill |
 | Preview `display_fps` well below `capture_fps` | SPI throughput: set `DISPLAY_SPI_HZ=40000000`, and raise the kernel spidev buffer so each frame needs 8× fewer ioctls — add `spidev.bufsiz=65536` to `extraargs=` in `/boot/orangepiEnv.txt`, reboot, confirm with `cat /sys/module/spidev/parameters/bufsiz` |
+| Works when started by hand, dead after a reboot | the service raced USB enumeration and exhausted its restart budget. Confirm with `systemctl status imagegencam` showing `start request repeated too quickly`. Fixed by `CAMERA_OPEN_TIMEOUT_SECONDS` (the app now waits for the device) plus a longer restart window — rerun `install_service.sh` to pick up the new unit |
 | Wi-Fi menu empty | NetworkManager not installed/managing the interface; see OS setup step 2 |
 | Setup hotspot never appears | rerun `install_service.sh` (adds the sudoers rules), check `WIFI_SETUP_PORTAL=1`, and confirm the adapter supports AP mode: `iw list \| grep -A6 "Supported interface modes"` |
 | Setup hotspot appears but the web page does not load | the camera serves it on port 80 via the service; if you started `run.sh` by hand it is on `http://10.42.0.1:8000` |

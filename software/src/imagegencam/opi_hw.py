@@ -25,6 +25,13 @@ def _env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, str(default)))
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
 class DisplayHATMini:
     """ST7796 + GPIO buttons behind the Pimoroni DisplayHATMini interface."""
 
@@ -146,13 +153,8 @@ class UsbCamera:
         if frame_rate:
             self._frame_rate = float(frame_rate)
 
-    def start(self) -> None:
-        import cv2
-
-        self._cv2 = cv2
-        capture = cv2.VideoCapture(self._device_index, cv2.CAP_V4L2)
-        if not capture.isOpened():
-            raise RuntimeError(f"USB camera /dev/video{self._device_index} failed to open")
+    def _configure_capture(self, capture) -> None:
+        cv2 = self._cv2
         capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -160,9 +162,37 @@ class UsbCamera:
         capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         ok, _ = capture.read()
         if not ok:
-            capture.release()
             raise RuntimeError(f"USB camera /dev/video{self._device_index} returned no frames")
-        self._capture = capture
+
+    def start(self) -> None:
+        # At boot the service races USB enumeration and wins, so the device node
+        # may not exist yet. Failing here exits the process, and enough quick
+        # exits make systemd give up on the unit for good -- which looks like
+        # "the camera only works when I start it by hand". Wait for the device
+        # instead.
+        import cv2
+
+        self._cv2 = cv2
+        deadline = time.monotonic() + _env_float("CAMERA_OPEN_TIMEOUT_SECONDS", 30.0)
+        attempts = 0
+        while True:
+            attempts += 1
+            capture = cv2.VideoCapture(self._device_index, cv2.CAP_V4L2)
+            failure = ""
+            if capture.isOpened():
+                try:
+                    self._configure_capture(capture)
+                except RuntimeError as exc:
+                    failure = str(exc)
+                else:
+                    self._capture = capture
+                    return
+            else:
+                failure = f"USB camera /dev/video{self._device_index} failed to open"
+            capture.release()
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"{failure} (gave up after {attempts} attempts)")
+            time.sleep(1.0)
 
     def capture_array(self, name: str = "main"):
         # Throttle to the configured frame rate; cameras that ignore
