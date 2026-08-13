@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
 from threading import Lock
+
+
+logger = logging.getLogger(__name__)
 
 
 PROMPT_TITLE_MAX_LENGTH = 22
@@ -281,6 +285,64 @@ def normalize_settings(data: dict[str, object]) -> dict[str, int | str]:
     return settings
 
 
+def write_json_atomic(path: Path, payload: object) -> None:
+    """Replace ``path`` in one step so an interrupted write cannot truncate it.
+
+    The camera has no shutdown button and the web UI autosaves prompts on a
+    keystroke debounce, so "power cut mid-save" is an ordinary event here. A
+    half-written store used to crash the service on every subsequent start.
+    """
+    # Serialize first: a payload that cannot be encoded should not even create
+    # the temp file, let alone leave one behind.
+    encoded = json.dumps(payload, indent=2) + "\n"
+    temp_path = path.with_name(f"{path.name}.tmp")
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp_path.replace(path)
+    except OSError:
+        temp_path.unlink(missing_ok=True)
+        raise
+    # The rename itself needs flushing too, or the directory entry can still be
+    # the old one after a power cut.
+    try:
+        directory = os.open(path.parent, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(directory)
+    except OSError:
+        pass
+    finally:
+        os.close(directory)
+
+
+def read_json_or_default(path: Path, default):
+    """Load JSON, falling back to ``default`` rather than raising.
+
+    Every caller here runs during controller startup. Letting a damaged file
+    raise takes the whole service down, and systemd's restart budget then
+    disables it outright -- so a corrupt store is set aside for inspection and
+    the camera comes up on defaults instead.
+    """
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return default
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.error("Could not read %s (%s); falling back to defaults", path, exc)
+        quarantine = path.with_name(f"{path.name}.corrupt")
+        try:
+            path.replace(quarantine)
+        except OSError:
+            logger.warning("Could not set aside the damaged %s", path)
+        else:
+            logger.error("The damaged file was kept at %s", quarantine)
+        return default
+
+
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
@@ -305,7 +367,7 @@ class PromptStore:
 
     def load_entries(self) -> dict[str, dict[str, str]]:
         with self._lock:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = read_json_or_default(self.path, DEFAULT_PROMPT_ENTRIES)
         return normalize_prompt_entries(data)
 
     def load(self) -> dict[str, str]:
@@ -319,10 +381,7 @@ class PromptStore:
             for prompt_id, entry in cleaned.items()
         ]
         with self._lock:
-            self.path.write_text(
-                json.dumps(serializable, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            write_json_atomic(self.path, serializable)
         return cleaned
 
     def save(self, prompts: dict[str, str]) -> dict[str, str]:
@@ -349,7 +408,7 @@ class SettingsStore:
 
     def load(self) -> dict[str, int | str]:
         with self._lock:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = read_json_or_default(self.path, DEFAULT_SETTINGS)
 
         return normalize_settings(data)
 
@@ -357,10 +416,7 @@ class SettingsStore:
         cleaned = normalize_settings(settings)
 
         with self._lock:
-            self.path.write_text(
-                json.dumps(cleaned, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            write_json_atomic(self.path, cleaned)
         return cleaned
 
 
@@ -374,16 +430,13 @@ class MagicHistoryStore:
 
     def load_entries(self) -> list[dict[str, str | None]]:
         with self._lock:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = read_json_or_default(self.path, [])
         return normalize_magic_history_entries(data)
 
     def save_entries(self, entries: object) -> list[dict[str, str | None]]:
         cleaned = normalize_magic_history_entries(entries)
         with self._lock:
-            self.path.write_text(
-                json.dumps(cleaned, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            write_json_atomic(self.path, cleaned)
         return cleaned
 
     def add_entry(self, entry: dict[str, object]) -> dict[str, str | None]:

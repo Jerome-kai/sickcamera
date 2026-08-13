@@ -28,7 +28,7 @@ from urllib.parse import quote, unquote
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 import qrcode
 
-from .config import MagicHistoryStore, PromptStore, SettingsStore
+from .config import MagicHistoryStore, PromptStore, SettingsStore, write_json_atomic
 from .job_store import PersistentJobStore
 from .openai_client import OpenAIImageEditor, OpenAIImageError, OpenAIMagicPromptPlanner
 from .web import delete_cached_thumbnail
@@ -48,6 +48,11 @@ PISUGAR_POWER_BUTTON_POLL_INTERVAL_SECONDS = 0.02
 PISUGAR_POWER_BUTTON_MAX_SHUTTER_PRESS_SECONDS = 0.6
 QUEUE_RETRY_BASE_SECONDS = 15.0
 QUEUE_RETRY_MAX_SECONDS = 15.0 * 60.0
+# Retrying forever is right for "the Wi-Fi is down" and wrong for "the model
+# refuses this prompt": the second kind never succeeds, and it leaves the queue
+# badge showing work that will never clear. With the backoff above this spans
+# roughly three hours before the camera gives up.
+QUEUE_MAX_ATTEMPTS = int(os.environ.get("QUEUE_MAX_ATTEMPTS", "12"))
 FONT_PATH = str(Path(__file__).resolve().parents[2] / "assets" / "fonts" / "Orbitron-Regular.ttf")
 MONO_FONT_PATH = FONT_PATH
 SHUTTER_EVENT_DIR = Path("/tmp/imagegencam-shutter-events")
@@ -740,7 +745,32 @@ class ImageGenCamController:
             magic_history_id=str(payload.get("magic_history_id") or "").strip() or None,
         )
 
-    def _reschedule_generation_job(self, job_id: str, payload: dict[str, object], error: Exception) -> None:
+    @property
+    def failed_jobs_root(self) -> Path:
+        return self.generation_job_store.path.parent / "failed"
+
+    def _abandon_generation_job(
+        self, job_id: str, payload: dict[str, object], attempts: int
+    ) -> None:
+        """Stop retrying, but keep the record so nothing vanishes silently."""
+        self.failed_jobs_root.mkdir(parents=True, exist_ok=True)
+        try:
+            write_json_atomic(self.failed_jobs_root / f"{job_id}.json", payload)
+        except OSError:
+            logger.exception("Could not record the abandoned job %s", job_id)
+        self.generation_job_store.delete_entry(job_id)
+        self._refresh_pending_jobs_count()
+        logger.error(
+            "Giving up on %s after %d attempts: %s",
+            job_id,
+            attempts,
+            payload.get("last_error"),
+        )
+
+    def _reschedule_generation_job(
+        self, job_id: str, payload: dict[str, object], error: Exception
+    ) -> bool:
+        """Queue another attempt. Returns False once the camera has given up."""
         attempts = int(payload.get("attempts") or 0) + 1
         updated_at = datetime.now()
         payload.update(
@@ -756,7 +786,12 @@ class ImageGenCamController:
         payload["next_attempt_at"] = datetime.fromtimestamp(
             float(payload["next_attempt_at"])
         ).isoformat(timespec="seconds")
+        if QUEUE_MAX_ATTEMPTS > 0 and attempts >= QUEUE_MAX_ATTEMPTS:
+            self._abandon_generation_job(job_id, payload, attempts)
+            return False
         self.generation_job_store.save_entry(job_id, payload)
+        self._refresh_pending_jobs_count()
+        return True
 
     def get_magic_history_entries(self) -> list[dict[str, str | None]]:
         return [dict(entry) for entry in self.magic_history]
@@ -2988,12 +3023,16 @@ class ImageGenCamController:
                     job.prompt_title,
                 )
                 self._register_completed_generation(result_path, job)
-            except (OpenAIImageError, Exception) as exc:
+            except Exception as exc:
                 logger.exception("Generation failed")
-                self._reschedule_generation_job(job_id, payload, exc)
+                will_retry = self._reschedule_generation_job(job_id, payload, exc)
                 with self.state_lock:
                     self.state.last_error = str(exc)
-                    self.state.status_message = "Generation queued for retry."
+                    self.state.status_message = (
+                        "Generation queued for retry."
+                        if will_retry
+                        else "Generation failed. Photo kept; edit not made."
+                    )
                 self.preview_overlay_dirty = True
 
     def _register_completed_generation(self, result_path: Path, job: GenerationJob) -> None:

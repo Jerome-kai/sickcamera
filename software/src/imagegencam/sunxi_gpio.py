@@ -34,6 +34,31 @@ _PULL_UP = 0b01
 _SYSFS_ROOT = "/sys/class/gpio"
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _retry_until(action, deadline: float, what: str):
+    """Run ``action`` until it stops raising OSError, or the deadline passes.
+
+    Exporting a line creates its sysfs files, but it is udev that then chowns
+    them to the ``gpio`` group. A service that opens ``direction`` the
+    microsecond after export can therefore hit EACCES -- and does so most
+    often at boot, when udev has a queue to work through. Failing here exits
+    the process, so retry through the gap instead.
+    """
+    while True:
+        try:
+            return action()
+        except OSError as exc:
+            if time.monotonic() >= deadline:
+                raise OSError(f"{what}: {exc}") from exc
+            time.sleep(0.02)
+
+
 def pull_register(line: int) -> tuple[int, int]:
     """Return (register byte offset from PIO base, bit shift) for a line's
     2-bit pull-control field in the H616 pin controller."""
@@ -86,22 +111,43 @@ class _SysfsLines:
         self._base = int(os.environ.get("GPIO_SYSFS_BASE", "0"))
         self._fds: dict[int, int] = {}
         self._exported: list[int] = []
-        for line in lines:
-            number = self._base + line
-            gpio_dir = f"{_SYSFS_ROOT}/gpio{number}"
-            if not os.path.isdir(gpio_dir):
-                with open(f"{_SYSFS_ROOT}/export", "w") as export:
-                    export.write(str(number))
+        deadline = time.monotonic() + _env_float("GPIO_SYSFS_READY_TIMEOUT_SECONDS", 5.0)
+        try:
+            for line in lines:
+                self._claim(line, direction, deadline)
+        except OSError:
+            # Give back whatever was already exported; a half-built object
+            # would otherwise leak file descriptors and block the retry.
+            self.release()
+            raise
+
+    def _claim(self, line: int, direction: str, deadline: float) -> None:
+        number = self._base + line
+        gpio_dir = f"{_SYSFS_ROOT}/gpio{number}"
+
+        def export() -> None:
+            if os.path.isdir(gpio_dir):
+                return
+            with open(f"{_SYSFS_ROOT}/export", "w") as export_file:
+                export_file.write(str(number))
+            if number not in self._exported:
                 self._exported.append(number)
-                # The direction file can take a moment to appear after export.
-                for _ in range(50):
-                    if os.path.isdir(gpio_dir):
-                        break
-                    time.sleep(0.01)
+            if not os.path.isdir(gpio_dir):
+                raise OSError(f"gpio{number} did not appear after export")
+
+        def set_direction() -> None:
             with open(f"{gpio_dir}/direction", "w") as direction_file:
                 direction_file.write(direction)
+
+        def open_value() -> int:
             flags = os.O_RDONLY if direction == "in" else os.O_WRONLY
-            self._fds[line] = os.open(f"{gpio_dir}/value", flags)
+            return os.open(f"{gpio_dir}/value", flags)
+
+        _retry_until(export, deadline, f"exporting gpio{number}")
+        # These two are the ones that race udev: the files exist as soon as the
+        # directory does, but stay root-owned until udev applies the gpio group.
+        _retry_until(set_direction, deadline, f"setting gpio{number} direction")
+        self._fds[line] = _retry_until(open_value, deadline, f"opening gpio{number} value")
 
     def release(self) -> None:
         for fd in self._fds.values():

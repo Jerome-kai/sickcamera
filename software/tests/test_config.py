@@ -16,6 +16,8 @@ from imagegencam.config import (
     SettingsStore,
     load_env_file,
     normalize_settings,
+    read_json_or_default,
+    write_json_atomic,
 )
 from imagegencam.job_store import PersistentJobStore
 
@@ -198,6 +200,88 @@ class PromptStoreTests(unittest.TestCase):
             self.assertEqual(store.count(), 1)
             store.delete_entry("alpha")
             self.assertEqual(store.count(), 0)
+
+
+class DurableStoreTests(unittest.TestCase):
+    def test_atomic_write_leaves_no_temp_file_behind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.json"
+
+            write_json_atomic(path, {"a": 1})
+
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"a": 1})
+            self.assertEqual([item.name for item in Path(tmp).iterdir()], ["settings.json"])
+
+    def test_atomic_write_keeps_the_old_file_when_the_write_fails(self) -> None:
+        # A power cut mid-write leaves the temp file damaged, never the real one.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prompts.json"
+            write_json_atomic(path, ["original"])
+
+            class Unserializable:
+                pass
+
+            with self.assertRaises(TypeError):
+                write_json_atomic(path, [Unserializable()])
+
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), ["original"])
+            self.assertEqual([item.name for item in Path(tmp).iterdir()], ["prompts.json"])
+
+    def test_reading_a_truncated_file_falls_back_instead_of_raising(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prompts.json"
+            path.write_text('[{"id": "prompt-1", "ti', encoding="utf-8")
+
+            self.assertEqual(read_json_or_default(path, ["fallback"]), ["fallback"])
+
+    def test_a_damaged_file_is_kept_for_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prompts.json"
+            path.write_text("not json at all", encoding="utf-8")
+
+            read_json_or_default(path, [])
+
+            quarantined = Path(tmp) / "prompts.json.corrupt"
+            self.assertTrue(quarantined.is_file())
+            self.assertEqual(quarantined.read_text(encoding="utf-8"), "not json at all")
+            self.assertFalse(path.exists())
+
+    def test_missing_file_falls_back_without_quarantining(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.json"
+
+            self.assertEqual(read_json_or_default(path, {"ok": True}), {"ok": True})
+            self.assertFalse((Path(tmp) / "settings.json.corrupt").exists())
+
+    def test_prompt_store_survives_a_corrupt_file(self) -> None:
+        # This is the startup path: raising here used to kill the service on
+        # every boot until somebody deleted the file by hand.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "prompts.json"
+            store = PromptStore(path)
+            path.write_text("[{tru", encoding="utf-8")
+
+            entries = store.load_entries()
+
+            self.assertEqual(
+                list(entries), [entry["id"] for entry in DEFAULT_PROMPT_ENTRIES]
+            )
+
+    def test_settings_store_survives_a_corrupt_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.json"
+            store = SettingsStore(path)
+            path.write_text("", encoding="utf-8")
+
+            self.assertEqual(store.load()["app_background_theme"], "aqua")
+
+    def test_magic_history_store_survives_a_corrupt_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "magic_history.json"
+            store = MagicHistoryStore(path)
+            path.write_text("\x00\x01", encoding="utf-8")
+
+            self.assertEqual(store.load_entries(), [])
 
 
 if __name__ == "__main__":
