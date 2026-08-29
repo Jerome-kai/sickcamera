@@ -19,9 +19,11 @@ attempt brings it back so the camera never becomes unreachable.
 
 import logging
 import os
+import secrets
 import socket
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 from .wifi_manager import WIFI_IFNAME, _run_privileged_nmcli, _split_nmcli_line
 
@@ -34,6 +36,11 @@ AP_GATEWAY_ADDRESS = "10.42.0.1"
 # WPA2 refuses anything shorter, and a short memorable phrase beats a random
 # string nobody can type off a 3.5" screen.
 MIN_AP_PASSWORD_LENGTH = 8
+# No i/l/1/o/0 -- the password is typed off the camera's display, so every
+# character must be unambiguous at 3.5 inches.
+_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+_PASSWORD_LENGTH = 10
+DEFAULT_PASSWORD_FILE = Path(__file__).resolve().parents[2] / "data" / "ap_password"
 
 
 def _env_ap_ssid() -> str:
@@ -45,16 +52,50 @@ def _env_ap_ssid() -> str:
     return f"ImageGenCam-{hostname[-4:]}" if len(hostname) > 4 else "ImageGenCam-Setup"
 
 
-def _env_ap_password() -> str:
+def _env_ap_password(password_file: Path | None = None) -> str:
+    """The hotspot password: the env override if valid, else this device's own.
+
+    A password that ships in the repository is public, and while the hotspot is
+    up it is the only thing between radio range and the whole web UI. So each
+    camera generates its own on first use, keeps it in data/ap_password, and
+    shows it on the display next to the SSID -- physical access to the screen
+    is the credential.
+    """
     configured = os.environ.get("WIFI_SETUP_AP_PASSWORD", "").strip()
     if len(configured) >= MIN_AP_PASSWORD_LENGTH:
         return configured
     if configured:
         logger.warning(
-            "WIFI_SETUP_AP_PASSWORD is shorter than %d characters; using the default",
+            "WIFI_SETUP_AP_PASSWORD is shorter than %d characters; "
+            "using this device's generated password",
             MIN_AP_PASSWORD_LENGTH,
         )
-    return "takeaphoto"
+    return _device_ap_password(password_file or DEFAULT_PASSWORD_FILE)
+
+
+def _device_ap_password(password_file: Path) -> str:
+    try:
+        stored = password_file.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        stored = ""
+    except OSError as exc:
+        logger.warning("Could not read %s: %s", password_file, exc)
+        stored = ""
+    if len(stored) >= MIN_AP_PASSWORD_LENGTH:
+        return stored
+
+    generated = "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(_PASSWORD_LENGTH))
+    try:
+        password_file.parent.mkdir(parents=True, exist_ok=True)
+        password_file.write_text(generated + "\n", encoding="utf-8")
+        os.chmod(password_file, 0o600)
+    except OSError as exc:
+        # Still usable this run; it will regenerate next boot, which only
+        # means the display shows a different password -- never a lockout.
+        logger.warning("Could not persist the hotspot password: %s", exc)
+    else:
+        logger.info("Generated this device's setup hotspot password")
+    return generated
 
 
 @dataclass(frozen=True)

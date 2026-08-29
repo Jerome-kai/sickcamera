@@ -57,6 +57,37 @@ FONT_PATH = str(Path(__file__).resolve().parents[2] / "assets" / "fonts" / "Orbi
 MONO_FONT_PATH = FONT_PATH
 SHUTTER_EVENT_DIR = Path("/tmp/imagegencam-shutter-events")
 WIFI_KEYBOARD_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.!?#@$%&*/: "
+TUTORIAL_PAGES: tuple[tuple[str, str], ...] = (
+    (
+        "Welcome",
+        "This camera takes a photo and has an AI redraw it. "
+        "A few buttons is all there is -- here is what they do.",
+    ),
+    (
+        "Shutter",
+        "The shutter takes a photo, sends it to the AI with the current "
+        "prompt, and drops the result in the album. Hold it to seed Magic "
+        "Mode from whatever the camera sees.",
+    ),
+    (
+        "Prompts",
+        "The prompt button opens the prompt picker. Prompts are the "
+        "instructions the AI follows -- pick one before you shoot, and edit "
+        "them from the web app.",
+    ),
+    (
+        "Album",
+        "The album button shows every generated photo. Press the shutter "
+        "there to compare with the original; the prompt button shows a "
+        "download QR code.",
+    ),
+    (
+        "Phone app",
+        "Triple-press the up button for diagnostics and a QR code that opens "
+        "the web app: photos, prompts and Wi-Fi all live there. "
+        "That's everything -- go shoot.",
+    ),
+)
 logger = logging.getLogger(__name__)
 
 
@@ -153,6 +184,13 @@ class ImageGenCamController:
         settings = self.settings_store.load()
         self.app_background_theme = str(settings["app_background_theme"])
         self.camera_username = str(settings["camera_username"])
+        self.tutorial_seen = bool(int(settings["tutorial_seen"]))
+        self.tutorial_index = 0
+        # Idle screen sleep: no shutdown button exists yet (the power switch is
+        # a hard cut), so "put it down for a while" is the case to optimize.
+        self.sleep_after_seconds = float(os.environ.get("SLEEP_AFTER_SECONDS", "300"))
+        self.sleep_active = False
+        self.last_user_activity = time.monotonic()
 
         self.swap_red_blue = os.environ.get("CAMERA_SWAP_RED_BLUE", "1").strip().lower() not in {
             "0",
@@ -463,6 +501,9 @@ class ImageGenCamController:
 
     def _camera_capture_loop(self) -> None:
         while self.running:
+            if self.sleep_active:
+                time.sleep(0.1)
+                continue
             try:
                 with self.camera_access_lock:
                     frame_array = self.picam2.capture_array("main")
@@ -516,6 +557,7 @@ class ImageGenCamController:
 
     def _queue_ui_event(self, action: str) -> None:
         now = time.monotonic()
+        self.last_user_activity = now
         if now - self.last_ui_press_time < 0.11:
             return
         self.last_ui_press_time = now
@@ -523,6 +565,7 @@ class ImageGenCamController:
 
     def _queue_shutter_event(self, event_name: str = "shutter") -> None:
         now = time.monotonic()
+        self.last_user_activity = now
         last_seen_at = self.last_shutter_event_times.get(event_name, 0.0)
         if now - last_seen_at < 0.125:
             return
@@ -1110,6 +1153,9 @@ class ImageGenCamController:
             self.state.capture_fps = f"{self.capture_fps_ema:.1f}" if self.capture_fps_ema > 0 else "-"
 
     def _check_stale_camera(self, now: float) -> None:
+        # Frames stop on purpose while asleep; that is not a hang.
+        if self.sleep_active:
+            return
         if self.capture_last_frame_at is None:
             return
         stale_for = now - self.capture_last_frame_at
@@ -2254,7 +2300,12 @@ class ImageGenCamController:
         note = "Note: your phone and camera must be on the same Wi-Fi network or mobile hotspot."
         for index, line in enumerate(self._wrap_text_pixels(note, note_font, 206)[:3]):
             draw.text((content_x, 176 + index * 12), line, font=note_font, fill=(60, 60, 60))
-        draw.text((content_x, 214), "top-left: Wi-Fi / top-right: info", font=meta_font, fill=(60, 60, 60))
+        draw.text(
+            (content_x, 214),
+            "left: Wi-Fi / down: tutorial / right: info",
+            font=meta_font,
+            fill=(60, 60, 60),
+        )
 
         qr_panel, _url = self._get_web_app_qr_image()
         qr_x = WIDTH - qr_panel.width - 30
@@ -2368,12 +2419,20 @@ class ImageGenCamController:
         if network is None:
             return ["Back"]
         if network.active:
-            return ["Current Network", "Enter Password", "Back"] if network.secure else ["Current Network", "Back"]
-        if network.saved and network.secure:
-            return ["Connect", "Enter Password", "Back"]
-        if network.secure:
-            return ["Enter Password", "Back"]
-        return ["Connect", "Back"]
+            options = ["Current Network", "Enter Password"] if network.secure else ["Current Network"]
+        elif network.saved and network.secure:
+            options = ["Connect", "Enter Password"]
+        elif network.secure:
+            options = ["Enter Password"]
+        else:
+            options = ["Connect"]
+        # Forgetting the active network is allowed: that is exactly how you
+        # leave a network you no longer trust. The setup hotspot is the
+        # recovery path if it was the only one.
+        if network.saved:
+            options.append("Forget")
+        options.append("Back")
+        return options
 
     def _render_wifi_detail_frame(self) -> None:
         network = self.wifi_selected_network
@@ -3120,6 +3179,102 @@ class ImageGenCamController:
             self.state.status_message = "Diagnostics"
         self.last_drawn_mode = None
 
+    # -- first-run tutorial --------------------------------------------
+
+    def _enter_tutorial(self) -> None:
+        self.tutorial_index = 0
+        with self.state_lock:
+            self.state.mode = "tutorial"
+            self.state.status_message = "Tutorial"
+        self.last_drawn_mode = None
+
+    def _advance_tutorial(self, delta: int) -> None:
+        target = self.tutorial_index + delta
+        if target >= len(TUTORIAL_PAGES):
+            self._finish_tutorial()
+            return
+        self.tutorial_index = max(0, target)
+        self.last_drawn_mode = None
+
+    def _finish_tutorial(self) -> None:
+        self._mark_tutorial_seen()
+        self._exit_to_preview()
+
+    def _mark_tutorial_seen(self) -> None:
+        if self.tutorial_seen:
+            return
+        self.tutorial_seen = True
+        try:
+            current_settings = self.settings_store.load()
+            current_settings["tutorial_seen"] = 1
+            self.settings_store.save(current_settings)
+        except Exception:
+            # Worst case the tutorial shows again next boot; never block on it.
+            logger.exception("Could not record that the tutorial was seen")
+
+    def _render_tutorial_frame(self) -> None:
+        index = max(0, min(self.tutorial_index, len(TUTORIAL_PAGES) - 1))
+        title, body = TUTORIAL_PAGES[index]
+        screen = self._get_modal_background().convert("RGBA")
+        screen = self._apply_glass_panel(
+            screen,
+            (24, 16, WIDTH - 24, HEIGHT - 16),
+            radius=18,
+            fill=(255, 255, 255, 202),
+            outline=(255, 255, 255, 236),
+        )
+        draw = ImageDraw.Draw(screen)
+        title_font = self._load_font(16)
+        body_font = self._load_font(11)
+        meta_font = self._load_font(9)
+        draw.text((40, 30), title, font=title_font, fill=(18, 18, 18))
+        draw.text(
+            (WIDTH - 74, 34), f"{index + 1}/{len(TUTORIAL_PAGES)}", font=meta_font, fill=(60, 60, 60)
+        )
+        y = 62
+        for line in self._wrap_text_pixels(body, body_font, WIDTH - 84)[:8]:
+            draw.text((40, y), line, font=body_font, fill=(30, 30, 30))
+            y += 17
+        footer = "next: shutter · back: up · skip: album"
+        draw.text((40, HEIGHT - 34), footer, font=meta_font, fill=(60, 60, 60))
+        self._render_to_display(screen.convert("RGB"))
+
+    # -- idle sleep ----------------------------------------------------
+
+    def _should_sleep(self, now: float, mode: str, pending_jobs: int) -> bool:
+        return (
+            self.sleep_after_seconds > 0
+            and not self.sleep_active
+            and mode == "preview"
+            and not self.wifi_connecting
+            and pending_jobs == 0
+            and (now - self.last_user_activity) >= self.sleep_after_seconds
+        )
+
+    def _enter_sleep(self) -> None:
+        logger.info("Screen sleeping after %.0fs idle", self.sleep_after_seconds)
+        self.sleep_active = True
+        with self.state_lock:
+            self.state.mode = "sleep"
+            self.state.status_message = "Sleeping"
+        self.last_drawn_mode = None
+        try:
+            self.display.set_backlight(0)
+        except Exception:
+            logger.exception("Backlight off failed")
+
+    def _wake_from_sleep(self) -> None:
+        self.sleep_active = False
+        self.last_user_activity = time.monotonic()
+        # The capture loop idled on purpose; don't let the stale-frame
+        # watchdog read that pause as a hang before the first fresh frame.
+        self.capture_last_frame_at = time.monotonic()
+        try:
+            self.display.set_backlight(1)
+        except Exception:
+            logger.exception("Backlight on failed")
+        self._exit_to_preview()
+
     # -- first-run setup portal ----------------------------------------
 
     def start_setup_portal_watchdog(self) -> None:
@@ -3403,7 +3558,34 @@ class ImageGenCamController:
         if option == "Enter Password":
             self._enter_wifi_password_for_selected()
             return
+        if option == "Forget":
+            self._forget_selected_wifi_network()
+            return
         self._enter_wifi_menu()
+
+    def _forget_selected_wifi_network(self) -> None:
+        network = self.wifi_selected_network
+        if network is None or not network.saved:
+            self._enter_wifi_menu()
+            return
+        try:
+            result = self.wifi_manager.forget(network)
+            ok = result.returncode == 0
+        except Exception as exc:
+            logger.exception("Forgetting %r failed", network.ssid)
+            self.wifi_connect_message = f"Forget failed: {exc}"
+            self._enter_wifi_menu()
+            return
+        if ok:
+            self.wifi_connect_message = f"Forgot {network.ssid}"
+            logger.info("Forgot the saved network %r", network.ssid)
+        else:
+            detail = (result.stderr or result.stdout).strip().splitlines()
+            self.wifi_connect_message = (
+                f"Forget failed: {detail[-1]}" if detail else "Forget failed"
+            )
+        self.wifi_selected_network = None
+        self._enter_wifi_menu(rescan=True)
 
     def _enter_wifi_password_for_selected(self) -> None:
         network = self.wifi_selected_network
@@ -3555,6 +3737,20 @@ class ImageGenCamController:
     def _handle_event(self, event: str) -> None:
         mode = self.get_status_snapshot()["mode"]
 
+        if mode == "sleep":
+            # Whatever woke the camera is spent on waking it.
+            self._wake_from_sleep()
+            return
+
+        if mode == "tutorial":
+            if event in {"shutter", "ui_prompt", "ui_down"}:
+                self._advance_tutorial(1)
+            elif event == "ui_up":
+                self._advance_tutorial(-1)
+            elif event == "ui_album":
+                self._finish_tutorial()
+            return
+
         if event == "magic_shutter":
             if mode in {"preview", "capture_feedback"}:
                 self._queue_magic_prompt_from_current_frame()
@@ -3684,9 +3880,13 @@ class ImageGenCamController:
                 self._scroll_wifi_detail(1)
             elif mode == "wifi_keyboard":
                 self._keyboard_scroll(1)
+            elif mode == "diagnostics":
+                self._enter_tutorial()
 
     def run(self) -> None:
         self.start_setup_portal_watchdog()
+        if not self.tutorial_seen:
+            self._enter_tutorial()
         try:
             while self.running:
                 now = time.monotonic()
@@ -3710,7 +3910,26 @@ class ImageGenCamController:
                 snapshot = self.get_status_snapshot()
                 mode = snapshot["mode"]
 
-                if mode == "capture_feedback":
+                if self._should_sleep(now, mode, int(snapshot["pending_jobs"] or 0)):
+                    self._enter_sleep()
+                    mode = "sleep"
+
+                if mode == "sleep":
+                    if self.last_drawn_mode != mode:
+                        self._render_to_display(
+                            Image.new("RGB", (WIDTH, HEIGHT)), decorate_battery=False
+                        )
+                        self.last_drawn_mode = mode
+                    time.sleep(0.05)
+                elif mode == "tutorial":
+                    if (
+                        self.last_drawn_mode != mode
+                        or (now - self.menu_last_redraw_at) >= 1.0
+                    ):
+                        self._render_tutorial_frame()
+                        self.menu_last_redraw_at = now
+                        self.last_drawn_mode = mode
+                elif mode == "capture_feedback":
                     if (now - self.capture_feedback_started_at) >= self.capture_feedback_duration_seconds:
                         self._exit_to_preview()
                     elif (

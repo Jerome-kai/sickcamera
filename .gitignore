@@ -19,3 +19,4 @@ software/data/generated/*
 software/data/queue/*
 !software/data/queue/.gitkeep
 software/data/thumbnails/
+software/data/ap_password

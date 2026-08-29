@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from imagegencam import wifi_setup
@@ -90,9 +92,66 @@ class SetupAccessPointTests(unittest.TestCase):
         self.assertEqual(info.url, "http://10.42.0.1")
         self.assertFalse(info.active)
 
-    def test_short_passwords_fall_back_to_the_default(self) -> None:
-        with patch.dict("os.environ", {"WIFI_SETUP_AP_PASSWORD": "short"}):
-            self.assertEqual(SetupAccessPoint(ssid="x").password, "takeaphoto")
+    def test_short_env_passwords_fall_back_to_the_device_password(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            password_file = Path(tmp) / "ap_password"
+            password_file.write_text("devicepass\n", encoding="utf-8")
+            with patch.dict("os.environ", {"WIFI_SETUP_AP_PASSWORD": "short"}):
+                with patch.object(wifi_setup, "DEFAULT_PASSWORD_FILE", password_file):
+                    self.assertEqual(SetupAccessPoint(ssid="x").password, "devicepass")
+
+
+class DevicePasswordTests(unittest.TestCase):
+    """Each camera gets its own hotspot password -- nothing in the repo works."""
+
+    def test_generates_and_persists_on_first_use(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            password_file = Path(tmp) / "ap_password"
+
+            first = wifi_setup._device_ap_password(password_file)
+            second = wifi_setup._device_ap_password(password_file)
+
+            self.assertEqual(first, second)
+            self.assertGreaterEqual(len(first), wifi_setup.MIN_AP_PASSWORD_LENGTH)
+            self.assertEqual(password_file.read_text(encoding="utf-8").strip(), first)
+
+    def test_every_character_is_typable_off_the_display(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            generated = wifi_setup._device_ap_password(Path(tmp) / "ap_password")
+        for character in generated:
+            self.assertIn(character, wifi_setup._PASSWORD_ALPHABET)
+        # The ambiguous-at-3.5-inches characters must never appear.
+        self.assertFalse(set("il1o0O") & set(generated))
+
+    def test_two_cameras_get_different_passwords(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            one = wifi_setup._device_ap_password(Path(tmp) / "camera-one")
+            two = wifi_setup._device_ap_password(Path(tmp) / "camera-two")
+        self.assertNotEqual(one, two)
+
+    def test_a_stored_password_that_is_too_short_is_replaced(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            password_file = Path(tmp) / "ap_password"
+            password_file.write_text("tiny\n", encoding="utf-8")
+
+            generated = wifi_setup._device_ap_password(password_file)
+
+            self.assertGreaterEqual(len(generated), wifi_setup.MIN_AP_PASSWORD_LENGTH)
+            self.assertEqual(password_file.read_text(encoding="utf-8").strip(), generated)
+
+    def test_env_override_still_wins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict("os.environ", {"WIFI_SETUP_AP_PASSWORD": "myownpassword"}):
+                self.assertEqual(
+                    wifi_setup._env_ap_password(Path(tmp) / "ap_password"),
+                    "myownpassword",
+                )
+
+    def test_an_unwritable_location_still_yields_a_usable_password(self) -> None:
+        generated = wifi_setup._device_ap_password(
+            Path("/proc/does-not-exist/ap_password")
+        )
+        self.assertGreaterEqual(len(generated), wifi_setup.MIN_AP_PASSWORD_LENGTH)
 
 
 class WebConnectValidationTests(unittest.TestCase):

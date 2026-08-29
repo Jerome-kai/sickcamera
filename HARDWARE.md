@@ -294,9 +294,19 @@ the setup page open, so the hotspot is never pulled out from under a half-filled
 once the camera is online, which is the easy way to move it between a home network and
 a phone hotspot.
 
-Defaults live in `.env` (`WIFI_SETUP_AP_SSID`, `WIFI_SETUP_AP_PASSWORD`, and
-`WIFI_SETUP_PORTAL=0` to switch the whole thing off). The hotspot needs the sudoers
-rules from `install_service.sh` — rerun it after upgrading an older install.
+The hotspot password is unique per camera: generated on first use, kept in
+`data/ap_password`, and shown on the display next to the hotspot name — so nothing
+printed in this repository gets a stranger onto your camera. Set
+`WIFI_SETUP_AP_PASSWORD` in `.env` to pin a fixed one instead (min 8 characters).
+Other defaults live in `.env` too (`WIFI_SETUP_AP_SSID`, and `WIFI_SETUP_PORTAL=0` to
+switch the whole thing off). The hotspot needs the sudoers rules from
+`install_service.sh` — rerun it after upgrading an older install.
+
+On the camera itself, the Wi-Fi list (triple-press **up** → left tab) now offers
+**Forget** on any saved network, and the diagnostics screen offers the first-run
+tutorial again via the **down** button. After `SLEEP_AFTER_SECONDS` (5 minutes by
+default) without a button press the screen sleeps; any button wakes it, and that
+press is spent on waking — it never also takes a photo.
 
 ## Troubleshooting
 

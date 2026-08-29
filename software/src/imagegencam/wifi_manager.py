@@ -3,9 +3,10 @@ from __future__ import annotations
 """Small, defensive wrapper around NetworkManager Wi-Fi commands.
 
 The camera is often headless, so Wi-Fi changes must be reversible. This module
-never deletes saved connections. New networks are added as normal
-NetworkManager profiles, and every connection attempt can schedule a rollback to
-the previously active profile.
+deletes a saved connection only when the owner explicitly asks to forget it --
+never as a side effect. New networks are added as normal NetworkManager
+profiles, and every connection attempt can schedule a rollback to the
+previously active profile.
 """
 
 import os
@@ -239,6 +240,16 @@ class NetworkManagerWifi:
     def connect_saved(self, network: WifiNetwork) -> subprocess.CompletedProcess[str]:
         connection_name = network.connection_name or network.ssid
         return _run_privileged_nmcli(["connection", "up", "id", connection_name], timeout=25.0)
+
+    def forget(self, network: WifiNetwork) -> subprocess.CompletedProcess[str]:
+        """Delete a saved profile. Only ever called from an explicit owner
+        action -- the on-device "Forget" option -- because deleting the last
+        working profile on a headless camera is one keystroke from a lockout
+        (the setup hotspot is the recovery path)."""
+        connection_name = network.connection_name or network.ssid
+        return _run_privileged_nmcli(
+            ["connection", "delete", "id", connection_name], timeout=15.0
+        )
 
     def connect_new(self, ssid: str, password: str = "") -> subprocess.CompletedProcess[str]:
         args = ["device", "wifi", "connect", ssid]

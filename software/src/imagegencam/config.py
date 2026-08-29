@@ -111,6 +111,8 @@ DEFAULT_SETTINGS = {
     "preview_red_gain": 100,
     "preview_green_gain": 100,
     "preview_blue_gain": 100,
+    # 0 until the owner finishes (or skips) the first-run tutorial once.
+    "tutorial_seen": 0,
 }
 
 VALID_APP_BACKGROUND_THEMES = {"aqua", "silver", "lavender", "mint", "sunset"}
@@ -281,6 +283,12 @@ def normalize_settings(data: dict[str, object]) -> dict[str, int | str]:
         int(DEFAULT_SETTINGS["preview_blue_gain"]),
         60,
         160,
+    )
+    settings["tutorial_seen"] = _clamp_int(
+        data.get("tutorial_seen"),
+        int(DEFAULT_SETTINGS["tutorial_seen"]),
+        0,
+        1,
     )
     return settings
 
