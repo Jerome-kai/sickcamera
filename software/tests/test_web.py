@@ -5,6 +5,9 @@ import unittest
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
+
+from imagegencam.controller import ImageGenCamController
 
 from imagegencam.web import (
     build_generated_images_zip,
@@ -21,10 +24,40 @@ from imagegencam.web import (
 )
 
 
+class _FakeState:
+    def __init__(self, last_generated_path: str | None = None) -> None:
+        self.last_generated_path = last_generated_path
+        self.ready_images = 0
+
+
 class _FakeController:
+    """Stands in for ImageGenCamController, which cannot be constructed in a
+    test because its __init__ opens the camera and the display.
+
+    It binds the REAL delete_generated_image rather than omitting it. Omitting
+    it made `hasattr(controller, "delete_generated_image")` false, so every
+    delete test silently exercised web.py's fallback branch -- a branch that
+    never runs on the device, because the real controller always defines the
+    method. Any attribute the real method touches has to exist here."""
+
     def __init__(self, project_root: Path, last_generated_path: str | None = None) -> None:
         self.project_root = project_root
+        self.generated_root = project_root / "data" / "generated"
         self._snapshot = {"last_generated_path": last_generated_path}
+        self.gallery_paths: list[Path] = []
+        self.album_cached_path: Path | None = None
+        self.album_index = 0
+        self.state = _FakeState(last_generated_path)
+        self.state_lock = Lock()
+
+    delete_generated_image = ImageGenCamController.delete_generated_image
+    # staticmethod: re-wrap it, or the class body turns it back into an
+    # instance method and `self` is passed as the path.
+    _is_generated_image_file = staticmethod(ImageGenCamController._is_generated_image_file)
+    _get_generated_metadata_path = ImageGenCamController._get_generated_metadata_path
+
+    def _invalidate_album_cache(self) -> None:
+        self.album_cached_path = None
 
     def get_status_snapshot(self) -> dict[str, str | None]:
         return dict(self._snapshot)

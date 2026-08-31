@@ -51,6 +51,26 @@ class _OpenAIClientBase:
         return self._client
 
     @staticmethod
+    def _write_output_atomic(output_path: Path, payload: bytes) -> None:
+        """Write the finished image via a temp file and a rename.
+
+        A power cut or a fail-fast exit part way through a plain write_bytes
+        leaves a truncated file at the final path, and the generation queue
+        treats an existing output as a completed job.
+        """
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = output_path.with_name(f"{output_path.name}.part")
+        try:
+            with temp_path.open("wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temp_path.replace(output_path)
+        except OSError:
+            temp_path.unlink(missing_ok=True)
+            raise
+
+    @staticmethod
     def _build_image_data_url(source_path: Path) -> str:
         content_type = mimetypes.guess_type(source_path.name)[0] or "image/jpeg"
         encoded = base64.b64encode(source_path.read_bytes()).decode("ascii")
@@ -171,8 +191,7 @@ class OpenAIImageEditor(_OpenAIClientBase):
                 for reference_file in reference_files:
                     reference_file.close()
 
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(self._extract_image_bytes(result))
+        self._write_output_atomic(output_path, self._extract_image_bytes(result))
         logger.info("Saved generated image to %s", output_path)
         return output_path
 
@@ -197,8 +216,7 @@ class OpenAIImageEditor(_OpenAIClientBase):
             timeout=self.timeout_seconds,
         )
         image_bytes = self._extract_chat_image_bytes(response)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(self._reencode(image_bytes))
+        self._write_output_atomic(output_path, self._reencode(image_bytes))
         logger.info("Saved generated image to %s", output_path)
         return output_path
 
@@ -249,8 +267,7 @@ class OpenAIImageEditor(_OpenAIClientBase):
             raise OpenAIImageError(f"images/generations failed: {exc}") from exc
 
         image_bytes = self._extract_generations_image_bytes(result)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(self._reencode(image_bytes))
+        self._write_output_atomic(output_path, self._reencode(image_bytes))
         logger.info("Saved generated image to %s", output_path)
         return output_path
 

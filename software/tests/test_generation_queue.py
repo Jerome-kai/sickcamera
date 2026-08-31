@@ -6,7 +6,12 @@ import unittest
 from pathlib import Path
 from threading import Lock
 
+import io
+
+from PIL import Image
+
 from imagegencam.controller import QUEUE_MAX_ATTEMPTS, ImageGenCamController
+from imagegencam.openai_client import OpenAIImageEditor
 from imagegencam.job_store import PersistentJobStore
 
 
@@ -85,6 +90,66 @@ class GenerationRetryCapTests(unittest.TestCase):
             self.assertTrue(all(outcomes[:-1]))
             self.assertFalse(outcomes[-1])
             self.assertEqual(stub.generation_job_store.count(), 0)
+
+
+class IncompleteImageTests(unittest.TestCase):
+    """A queued job whose output already exists is treated as done, so the
+    'already exists' check has to reject the half-written file an interrupted
+    write leaves at the final path."""
+
+    @staticmethod
+    def _jpeg() -> bytes:
+        buffer = io.BytesIO()
+        Image.new("RGB", (400, 300), (30, 90, 160)).save(buffer, "JPEG")
+        return buffer.getvalue()
+
+    def test_a_whole_image_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "whole.jpg"
+            path.write_bytes(self._jpeg())
+
+            self.assertTrue(ImageGenCamController._is_complete_image(path))
+
+    def test_a_truncated_image_is_rejected(self) -> None:
+        # verify() passes this -- it only walks the container structure and
+        # never decodes the scan data. Only a real load() catches it.
+        whole = self._jpeg()
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, data in (
+                ("third.jpg", whole[: len(whole) // 3]),
+                ("nearly.jpg", whole[:-40]),
+                ("empty.jpg", b""),
+                ("garbage.jpg", b"not an image at all"),
+            ):
+                path = Path(tmp) / name
+                path.write_bytes(data)
+                with self.subTest(name=name):
+                    self.assertFalse(ImageGenCamController._is_complete_image(path))
+
+    def test_a_missing_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(ImageGenCamController._is_complete_image(Path(tmp) / "nope.jpg"))
+
+
+class AtomicImageWriteTests(unittest.TestCase):
+    def test_the_finished_image_appears_whole_or_not_at_all(self) -> None:
+        payload = IncompleteImageTests._jpeg()
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "nested" / "out.jpg"
+
+            OpenAIImageEditor._write_output_atomic(output, payload)
+
+            self.assertEqual(output.read_bytes(), payload)
+            self.assertEqual(list(output.parent.glob("*.part")), [])
+
+    def test_a_failed_write_leaves_no_partial_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "out.jpg"
+
+            with self.assertRaises(TypeError):
+                OpenAIImageEditor._write_output_atomic(output, "not bytes")
+
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

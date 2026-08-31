@@ -9,6 +9,12 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 BOOT_SPLASH_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-boot-splash.service"
 BOOT_SPLASH_SERVICE_NAME="imagegencam-boot-splash.service"
 BOOT_SPLASH_SERVICE_PATH="/etc/systemd/system/${BOOT_SPLASH_SERVICE_NAME}"
+PULLUPS_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-pullups.service"
+PULLUPS_SERVICE_NAME="imagegencam-pullups.service"
+PULLUPS_SERVICE_PATH="/etc/systemd/system/${PULLUPS_SERVICE_NAME}"
+PULLUPS_SCRIPT_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-pullups.py"
+PULLUPS_SCRIPT_DIR="/usr/local/lib/imagegencam"
+PULLUPS_SCRIPT_PATH="${PULLUPS_SCRIPT_DIR}/pullups.py"
 SUDOERS_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-nmcli.sudoers"
 SUDOERS_PATH="/etc/sudoers.d/imagegencam-nmcli"
 UDEV_RULES_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/99-imagegencam-hw.rules"
@@ -89,6 +95,7 @@ render_service() {
 
 render_boot_splash_service() {
   sed \
+    -e "s|__SERVICE_USER__|${SERVICE_USER}|g" \
     -e "s|__PROJECT_ROOT__|${PROJECT_ROOT}|g" \
     "${BOOT_SPLASH_TEMPLATE_PATH}"
 }
@@ -122,8 +129,20 @@ render_sudoers > "${SUDOERS_TMP_FILE}"
 
 sudo install -m 0644 "${TMP_FILE}" "${SERVICE_PATH}"
 sudo install -m 0644 "${BOOT_SPLASH_TMP_FILE}" "${BOOT_SPLASH_SERVICE_PATH}"
+sudo install -m 0644 "${PULLUPS_TEMPLATE_PATH}" "${PULLUPS_SERVICE_PATH}"
+
+# Root runs this one, so it is owned by root and lives outside the checkout the
+# service user can write.
+sudo install -d -m 0755 -o root -g root "${PULLUPS_SCRIPT_DIR}"
+sudo install -m 0755 -o root -g root "${PULLUPS_SCRIPT_TEMPLATE_PATH}" "${PULLUPS_SCRIPT_PATH}"
+
+# Validate BEFORE the fragment goes live: a malformed file in /etc/sudoers.d
+# breaks sudo for everyone, including the sudo needed to remove it.
+if ! sudo visudo -cf "${SUDOERS_TMP_FILE}"; then
+  echo "Refusing to install an invalid sudoers fragment; Wi-Fi control will not work." >&2
+  exit 1
+fi
 sudo install -m 0440 "${SUDOERS_TMP_FILE}" "${SUDOERS_PATH}"
-sudo visudo -cf "${SUDOERS_PATH}"
 chmod +x "${PROJECT_ROOT}/scripts/show_boot_splash.py"
 
 # GPIO/SPI access for the service user without running as root.
@@ -136,6 +155,7 @@ sudo udevadm trigger --subsystem-match=spidev --subsystem-match=gpio || true
 
 sudo systemctl daemon-reload
 sudo systemctl set-default multi-user.target
+sudo systemctl enable "${PULLUPS_SERVICE_NAME}"
 sudo systemctl enable "${BOOT_SPLASH_SERVICE_NAME}"
 for SERVICE in "${UNUSED_SERVICES[@]}"; do
   timeout 12s sudo systemctl disable --now "${SERVICE}" >/dev/null 2>&1 || true

@@ -1,0 +1,21 @@
+[Unit]
+Description=ImageGenCam GPIO Pull-ups
+After=local-fs.target systemd-modules-load.service
+Before=imagegencam-boot-splash.service imagegencam.service
+Wants=local-fs.target
+
+[Service]
+# The one genuinely privileged step: the H616 pull-up bits are only reachable
+# through /dev/mem. The script is installed root-owned outside the project tree
+# and uses the system interpreter, so root never runs a file the service user
+# can write. Everything else in the boot path runs unprivileged.
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/lib/imagegencam/pullups.py
+RemainAfterExit=yes
+TimeoutStartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

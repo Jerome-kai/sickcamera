@@ -294,6 +294,12 @@ the setup page open, so the hotspot is never pulled out from under a half-filled
 once the camera is online, which is the easy way to move it between a home network and
 a phone hotspot.
 
+The hotspot is not a first-boot-only affair: the camera keeps checking that it
+still has a network, and republishes the hotspot whenever it loses one for good
+— a replaced router, a changed password, a move to a new house. Without that,
+a camera that was working could end up with no network, no web UI and no SSH,
+and no way back in short of a card reader.
+
 The hotspot password is unique per camera: generated on first use, kept in
 `data/ap_password`, and shown on the display next to the hotspot name — so nothing
 printed in this repository gets a stranger onto your camera. Set

@@ -119,6 +119,7 @@ class _SleepStub:
         self.capture_last_frame_at: float | None = 10.0
         self.stale_frame_timeout_seconds = 2.0
         self.exited_to_preview = 0
+        self.setup_portal_active = False
 
     _should_sleep = ImageGenCamController._should_sleep
     _enter_sleep = ImageGenCamController._enter_sleep
@@ -182,6 +183,31 @@ class SleepTests(unittest.TestCase):
 
         stub._check_stale_camera(10_000.0)
 
+    def test_a_background_mode_change_does_not_strand_the_camera(self) -> None:
+        # The setup-portal watchdog and the web Wi-Fi connect both write
+        # state.mode from other threads with no idea the camera is asleep.
+        # Waking must key off sleep_active, or the backlight stays off forever.
+        stub = _SleepStub()
+        stub._enter_sleep()
+
+        stub.state.mode = "wifi_setup"  # background thread, mid-nap
+
+        self.assertTrue(stub.sleep_active)
+        stub._wake_from_sleep()
+        self.assertFalse(stub.sleep_active)
+        self.assertEqual(stub.display.backlight_calls, [0, 1])
+
+    def test_waking_keeps_the_setup_screen_when_the_hotspot_came_up(self) -> None:
+        stub = _SleepStub()
+        stub._enter_sleep()
+        stub.setup_portal_active = True
+
+        stub._wake_from_sleep()
+
+        # Join instructions beat the viewfinder here.
+        self.assertEqual(stub.state.mode, "wifi_setup")
+        self.assertEqual(stub.exited_to_preview, 0)
+
     def test_waking_resets_the_stale_frame_clock(self) -> None:
         stub = _SleepStub()
         stub._enter_sleep()
@@ -206,6 +232,7 @@ class _ForgetStub:
         self.wifi_manager = self
 
     _forget_selected_wifi_network = ImageGenCamController._forget_selected_wifi_network
+    _return_to_wifi_menu = ImageGenCamController._return_to_wifi_menu
     _wifi_detail_options = ImageGenCamController._wifi_detail_options
 
     def forget(self, network):
@@ -220,7 +247,12 @@ class _ForgetStub:
         )
 
     def _enter_wifi_menu(self, *, rescan: bool = False) -> None:
+        # Mirrors the real _enter_wifi_menu, which ALWAYS overwrites
+        # wifi_connect_message with its own scan status. A no-op stub here hid
+        # a real bug: the "Forgot <ssid>" confirmation was being wiped before
+        # the owner ever saw it.
         self.entered_menu.append(rescan)
+        self.wifi_connect_message = "Scan complete" if rescan else ""
 
 
 class ForgetOptionTests(unittest.TestCase):
@@ -257,6 +289,24 @@ class ForgetOptionTests(unittest.TestCase):
         stub._forget_selected_wifi_network()
 
         self.assertIn("Forget failed", stub.wifi_connect_message)
+
+    def test_the_outcome_survives_the_rescan_that_follows(self) -> None:
+        # Regression: _enter_wifi_menu(rescan=True) sets "Scan complete", so
+        # the confirmation has to be reapplied after it, not before.
+        stub = _ForgetStub(self._network(saved=True))
+
+        stub._forget_selected_wifi_network()
+
+        self.assertEqual(stub.wifi_connect_message, "Forgot Home")
+        self.assertNotEqual(stub.wifi_connect_message, "Scan complete")
+
+    def test_an_exception_message_also_survives(self) -> None:
+        stub = _ForgetStub(self._network(saved=True))
+        stub.forget = lambda network: (_ for _ in ()).throw(OSError("nmcli gone"))
+
+        stub._forget_selected_wifi_network()
+
+        self.assertIn("nmcli gone", stub.wifi_connect_message)
 
     def test_an_unsaved_selection_is_refused(self) -> None:
         stub = _ForgetStub(self._network(saved=False))

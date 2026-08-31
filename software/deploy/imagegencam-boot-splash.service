@@ -1,12 +1,18 @@
 [Unit]
 Description=ImageGenCam Early Boot Splash
-After=local-fs.target systemd-modules-load.service
+After=local-fs.target systemd-modules-load.service imagegencam-pullups.service
 Before=network.target imagegencam.service
-Wants=local-fs.target
+Wants=local-fs.target imagegencam-pullups.service
 
 [Service]
+# Runs as the service user, not root: this unit executes the project's own
+# venv interpreter and scripts, which that user owns and can rewrite. Running
+# it as root would turn any write access to the checkout into root execution
+# at the next boot. The privileged pull-up step lives in
+# imagegencam-pullups.service instead.
 Type=oneshot
-User=root
+User=__SERVICE_USER__
+SupplementaryGroups=gpio spi video
 WorkingDirectory=__PROJECT_ROOT__
 EnvironmentFile=-__PROJECT_ROOT__/.env
 ExecStart=__PROJECT_ROOT__/.venv/bin/python3 __PROJECT_ROOT__/scripts/show_boot_splash.py

@@ -304,6 +304,10 @@ class ImageGenCamController:
         # control how often it drops the hotspot to look again.
         self.setup_retry_seconds = float(os.environ.get("WIFI_SETUP_RETRY_SECONDS", "600"))
         self.setup_rejoin_seconds = float(os.environ.get("WIFI_SETUP_REJOIN_SECONDS", "40"))
+        # How often to re-check that a healthy camera is still on a network.
+        self.setup_offline_poll_seconds = float(
+            os.environ.get("WIFI_SETUP_OFFLINE_POLL_SECONDS", "60")
+        )
         self.setup_portal_last_activity = 0.0
         self.setup_portal_enabled = (
             os.environ.get("WIFI_SETUP_PORTAL", "1").strip().lower() not in {"0", "false", "no"}
@@ -1926,6 +1930,25 @@ class ImageGenCamController:
         return sorted(paths, key=lambda path: path.stat().st_mtime_ns, reverse=True)
 
     @staticmethod
+    def _is_complete_image(path: Path) -> bool:
+        """True only for a file that decodes as a whole image.
+
+        Used to decide whether a queued job's output already exists, so it has
+        to catch the truncated tail an interrupted write leaves behind. That
+        means a real decode: verify() only walks the container structure and
+        happily passes a JPEG whose scan data is cut short.
+        """
+        if not path.is_file() or path.stat().st_size == 0:
+            return False
+        try:
+            with Image.open(path) as image:
+                image.load()
+        except Exception:
+            logger.warning("Discarding incomplete image %s", path)
+            return False
+        return True
+
+    @staticmethod
     def _is_generated_image_file(path: Path) -> bool:
         return (
             path.is_file()
@@ -3050,7 +3073,11 @@ class ImageGenCamController:
 
             started_at = time.monotonic()
             try:
-                if job.generated_path.is_file():
+                # Only trust a pre-existing output if it is a complete image.
+                # edit_image writes it in one shot but not atomically, so a
+                # power cut or a fail-fast exit mid-write leaves a truncated
+                # file that would otherwise be accepted as the finished result.
+                if self._is_complete_image(job.generated_path):
                     result_path = job.generated_path
                 else:
                     with self.image_edit_lock:
@@ -3084,7 +3111,18 @@ class ImageGenCamController:
                 self._register_completed_generation(result_path, job)
             except Exception as exc:
                 logger.exception("Generation failed")
-                will_retry = self._reschedule_generation_job(job_id, payload, exc)
+                # The recovery path writes to disk, so it can fail too -- and a
+                # full disk is exactly when it will. Letting that escape would
+                # end this loop and kill the worker thread for the rest of the
+                # process: every later photo would queue and nothing would ever
+                # run it. Absorb it and keep serving the queue.
+                try:
+                    will_retry = self._reschedule_generation_job(job_id, payload, exc)
+                except Exception:
+                    logger.exception("Could not record the failed job %s", job_id)
+                    will_retry = False
+                    # Back off rather than spinning on a job we cannot rewrite.
+                    time.sleep(QUEUE_RETRY_BASE_SECONDS)
                 with self.state_lock:
                     self.state.last_error = str(exc)
                     self.state.status_message = (
@@ -3273,6 +3311,13 @@ class ImageGenCamController:
             self.display.set_backlight(1)
         except Exception:
             logger.exception("Backlight on failed")
+        if self.setup_portal_active:
+            # The hotspot went up while the camera slept; the join
+            # instructions matter more than the viewfinder.
+            with self.state_lock:
+                self.state.mode = "wifi_setup"
+            self.last_drawn_mode = None
+            return
         self._exit_to_preview()
 
     # -- first-run setup portal ----------------------------------------
@@ -3287,22 +3332,42 @@ class ImageGenCamController:
         self.setup_portal_thread.start()
 
     def _setup_portal_watchdog(self) -> None:
-        # NetworkManager needs a moment to try every saved network before we
-        # can call the camera offline.
-        deadline = time.monotonic() + self.setup_grace_seconds
-        while self.running and time.monotonic() < deadline:
-            if self.setup_access_point.is_online():
-                self.setup_portal_checked = True
+        """Publish the setup hotspot whenever the camera has no network.
+
+        This runs for the life of the process, not just at boot. A camera that
+        came up online can lose its network later -- the router is replaced,
+        the password changes, it moves house -- and if the hotspot only ever
+        appeared during the first minute of uptime there would be no way back
+        in: no network means no web UI and no SSH either.
+        """
+        first_pass = True
+        while self.running:
+            # NetworkManager needs a moment to try every saved network before
+            # we can call the camera offline.
+            grace = self.setup_grace_seconds if first_pass else self.setup_rejoin_seconds
+            deadline = time.monotonic() + grace
+            went_online = False
+            while self.running and time.monotonic() < deadline:
+                if self.setup_access_point.is_online():
+                    went_online = True
+                    break
+                time.sleep(3.0)
+            self.setup_portal_checked = True
+            first_pass = False
+
+            if not self.running:
                 return
-            time.sleep(3.0)
-        self.setup_portal_checked = True
-        if not self.running or self.setup_access_point.is_online():
-            return
-        logger.info(
-            "No Wi-Fi after %.0fs; publishing the setup hotspot", self.setup_grace_seconds
-        )
-        if self.open_setup_portal():
-            self._setup_portal_retry_loop()
+            if went_online or self.setup_access_point.is_online():
+                # Healthy: watch for the connection dropping later.
+                time.sleep(self.setup_offline_poll_seconds)
+                continue
+
+            logger.info("No Wi-Fi after %.0fs; publishing the setup hotspot", grace)
+            if self.open_setup_portal():
+                # Blocks until a network comes back and the hotspot goes down.
+                self._setup_portal_retry_loop()
+            else:
+                time.sleep(self.setup_offline_poll_seconds)
 
     def _setup_portal_retry_loop(self) -> None:
         """Periodically drop the hotspot to see if a known network is back.
@@ -3323,7 +3388,10 @@ class ImageGenCamController:
             idle_seconds = time.monotonic() - self.setup_portal_last_activity
             if self.setup_portal_last_activity and idle_seconds < 120:
                 continue
-            self._retry_known_networks()
+            if self._retry_known_networks():
+                # Back on a real network: hand control to the watchdog, which
+                # keeps checking and will republish the hotspot if it drops.
+                return
 
     def _retry_known_networks(self) -> bool:
         """Take the hotspot down briefly and let NetworkManager try to rejoin."""
@@ -3566,26 +3634,30 @@ class ImageGenCamController:
     def _forget_selected_wifi_network(self) -> None:
         network = self.wifi_selected_network
         if network is None or not network.saved:
-            self._enter_wifi_menu()
+            self._return_to_wifi_menu("")
             return
         try:
             result = self.wifi_manager.forget(network)
-            ok = result.returncode == 0
         except Exception as exc:
             logger.exception("Forgetting %r failed", network.ssid)
-            self.wifi_connect_message = f"Forget failed: {exc}"
-            self._enter_wifi_menu()
+            self._return_to_wifi_menu(f"Forget failed: {exc}")
             return
-        if ok:
-            self.wifi_connect_message = f"Forgot {network.ssid}"
+        if result.returncode == 0:
             logger.info("Forgot the saved network %r", network.ssid)
+            outcome = f"Forgot {network.ssid}"
         else:
             detail = (result.stderr or result.stdout).strip().splitlines()
-            self.wifi_connect_message = (
-                f"Forget failed: {detail[-1]}" if detail else "Forget failed"
-            )
+            outcome = f"Forget failed: {detail[-1]}" if detail else "Forget failed"
         self.wifi_selected_network = None
-        self._enter_wifi_menu(rescan=True)
+        self._return_to_wifi_menu(outcome, rescan=True)
+
+    def _return_to_wifi_menu(self, outcome: str, *, rescan: bool = False) -> None:
+        """Go back to the network list showing `outcome` rather than the scan
+        status. _enter_wifi_menu always overwrites wifi_connect_message with
+        its own text, which would otherwise swallow the result of the action
+        the owner just took."""
+        self._enter_wifi_menu(rescan=rescan)
+        self.wifi_connect_message = outcome
 
     def _enter_wifi_password_for_selected(self) -> None:
         network = self.wifi_selected_network
@@ -3737,7 +3809,12 @@ class ImageGenCamController:
     def _handle_event(self, event: str) -> None:
         mode = self.get_status_snapshot()["mode"]
 
-        if mode == "sleep":
+        # Keyed on sleep_active, not on mode: background threads (the setup
+        # portal watchdog, the web Wi-Fi connect) overwrite state.mode without
+        # knowing the camera is asleep. Trusting mode here meant one such write
+        # made every later press miss this branch, leaving the backlight off
+        # and the capture loop parked with no way back short of a power cycle.
+        if self.sleep_active:
             # Whatever woke the camera is spent on waking it.
             self._wake_from_sleep()
             return
@@ -3914,7 +3991,7 @@ class ImageGenCamController:
                     self._enter_sleep()
                     mode = "sleep"
 
-                if mode == "sleep":
+                if self.sleep_active:
                     if self.last_drawn_mode != mode:
                         self._render_to_display(
                             Image.new("RGB", (WIDTH, HEIGHT)), decorate_battery=False
