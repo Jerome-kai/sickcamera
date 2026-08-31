@@ -2171,6 +2171,12 @@ def build_handler(controller):
             except ValueError:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Invalid Content-Length")
                 return None
+            # A negative length passes int() and slips under the ceiling below,
+            # and rfile.read(-1) means "read until EOF" -- so one unauthenticated
+            # POST could stream unbounded data into RAM on a 512MB board.
+            if length < 0:
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid Content-Length")
+                return None
             if length > MAX_POST_BODY_BYTES:
                 self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Request body is too large")
                 return None

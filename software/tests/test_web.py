@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import socket
 import tempfile
 import unittest
 import zipfile
+from http.server import ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 
 from imagegencam.controller import ImageGenCamController
 
 from imagegencam.web import (
+    MAX_POST_BODY_BYTES,
+    build_handler,
     build_generated_images_zip,
     build_generated_image_list,
     build_selected_images_zip,
@@ -67,6 +71,12 @@ class _FakeController:
             {"id": "prompt-1", "title": "First", "body": "First prompt"},
             {"id": "prompt-2", "title": "Second", "body": "Second prompt"},
         ]
+
+    def update_prompt_entries(self, prompts: object) -> list[dict[str, str]]:
+        # /save calls this; without it the handler raised and the connection
+        # closed with no response at all.
+        self.saved_prompts = prompts
+        return self.get_prompt_entries()
 
     def get_device_details(self) -> dict[str, object]:
         return {
@@ -530,6 +540,60 @@ class ProjectAssetTests(unittest.TestCase):
             (root / "assets" / "leak").symlink_to(root / ".env")
 
             self.assertIsNone(read_project_asset(root, "/assets/leak"))
+
+
+class RequestBodyLimitTests(unittest.TestCase):
+    """Driven over a real socket: the defect was in how the header is parsed
+    before any body is read, which a fake request object would not reproduce."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        (root / "data" / "generated").mkdir(parents=True)
+        self.server = ThreadingHTTPServer(
+            ("127.0.0.1", 0), build_handler(_FakeController(root))
+        )
+        Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+
+    def _post(self, content_length: str, body: bytes = b"") -> str:
+        """Send one request and return its status line.
+
+        No body is streamed: the header alone has to settle it. If the server
+        instead starts reading, it blocks until EOF and recv times out -- which
+        is precisely the bug, so a timeout here is a failure, not flakiness.
+        """
+        host, port = self.server.server_address
+        sock = socket.create_connection((host, port), timeout=5)
+        try:
+            sock.sendall(
+                b"POST /save HTTP/1.1\r\nHost: x\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: " + content_length.encode() + b"\r\n\r\n" + body
+            )
+            sock.settimeout(4)
+            try:
+                received = sock.recv(200)
+            except socket.timeout:
+                return "<no response: server is reading the body>"
+            return received.decode("utf-8", "replace").splitlines()[0] if received else "<closed>"
+        finally:
+            sock.close()
+
+    def test_a_negative_content_length_is_rejected(self) -> None:
+        # int("-1") parses fine and -1 > MAX_POST_BODY_BYTES is False, so this
+        # used to reach rfile.read(-1) -- read-until-EOF, uncapped, on a 512MB
+        # board. Answering at all (rather than reading) is the fix.
+        self.assertIn("400", self._post("-1"))
+
+    def test_an_oversized_content_length_is_rejected(self) -> None:
+        self.assertIn("413", self._post(str(MAX_POST_BODY_BYTES + 1)))
+
+    def test_a_normal_request_still_works(self) -> None:
+        body = b'{"prompts":[]}'
+        self.assertIn("200", self._post(str(len(body)), body))
 
 
 if __name__ == "__main__":
