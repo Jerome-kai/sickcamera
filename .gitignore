@@ -12,6 +12,9 @@ software/.venv/
 **/__pycache__/
 **/*.pyc
 software/.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
 software/data/captures/*
 !software/data/captures/.gitkeep
 software/data/generated/*
