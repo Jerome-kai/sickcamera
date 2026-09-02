@@ -314,6 +314,41 @@ tutorial again via the **down** button. After `SLEEP_AFTER_SECONDS` (5 minutes b
 default) without a button press the screen sleeps; any button wakes it, and that
 press is spent on waking — it never also takes a photo.
 
+## Preview frame rate
+
+The preview's ceiling is the SPI link, not the CPU. A full 480×320 RGB565 frame
+is 307,200 bytes, so at the default `DISPLAY_SPI_HZ=40000000` one frame costs
+about 61 ms — roughly **16 fps maximum**, no matter how idle the processor is.
+
+Defaults are `PREVIEW_TARGET_FPS=15`, `CAMERA_FRAME_RATE=15`, with menus and the
+album at 10 (they are static between key presses, so spending SPI bandwidth on
+them buys nothing).
+
+To go faster you have to raise the SPI clock first:
+
+| `DISPLAY_SPI_HZ` | Frame time | Ceiling |
+|---|---|---|
+| 40000000 (default) | 61 ms | ~16 fps |
+| 50000000 | 49 ms | ~20 fps |
+| 62500000 | 39 ms | ~25 fps |
+
+Most ST7796 modules run happily at 50 MHz. Raise it, then raise
+`PREVIEW_TARGET_FPS` and `CAMERA_FRAME_RATE` to match. **If you see torn,
+speckled or colour-shifted frames, the clock is too high for your wiring** —
+step back down. Long or untwisted SPI jumpers are the usual limit; the carrier
+PCB planned for v2 should tolerate more than dupont wires do.
+
+Check what the camera can actually deliver before raising `CAMERA_FRAME_RATE`:
+
+```bash
+v4l2-ctl -d /dev/video0 --list-formats-ext
+```
+
+The diagnostics screen shows the rates actually achieved (triple-press **up**,
+then the top-right tab) — the numbers to watch are capture fps and display fps.
+If display fps sits well under your target while CPU has headroom, SPI is the
+limit; if CPU is pinned, lower the target instead.
+
 ## Troubleshooting
 
 | Symptom | Fix |

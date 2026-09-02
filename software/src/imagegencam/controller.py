@@ -40,9 +40,14 @@ WIDTH = 320
 HEIGHT = 240
 SIDE_CONTROL_TOP_Y = 64
 SIDE_CONTROL_BOTTOM_Y = HEIGHT - 98
-PREVIEW_REDRAW_INTERVAL_SECONDS = 1.0 / 8.0
-MENU_REDRAW_INTERVAL_SECONDS = 1.0 / 8.0
-ALBUM_REDRAW_INTERVAL_SECONDS = 1.0 / 8.0
+# Defaults only -- the live values are read from the environment in __init__.
+# The real ceiling is the SPI link, not the CPU: a full 480x320 RGB565 frame is
+# 307200 bytes, so at DISPLAY_SPI_HZ=40MHz one frame costs ~61ms and nothing
+# above ~16fps is reachable however much CPU is idle. Raise DISPLAY_SPI_HZ
+# first if you want more than that.
+PREVIEW_REDRAW_INTERVAL_SECONDS = 1.0 / 15.0
+MENU_REDRAW_INTERVAL_SECONDS = 1.0 / 10.0
+ALBUM_REDRAW_INTERVAL_SECONDS = 1.0 / 10.0
 BATTERY_REFRESH_INTERVAL_SECONDS = 20.0
 PISUGAR_POWER_BUTTON_POLL_INTERVAL_SECONDS = 0.02
 PISUGAR_POWER_BUTTON_MAX_SHUTTER_PRESS_SECONDS = 0.6
@@ -173,6 +178,17 @@ class ImageGenCamController:
         self.display_rotation = int(os.environ.get("DISPLAY_ST7789_ROTATION", "0"))
         self.web_port = int(os.environ.get("IMAGE_GEN_PORT", "8000"))
         self.camera_rotation_degrees = int(os.environ.get("CAMERA_ROTATION_DEGREES", "270"))
+        # Redraw budgets. Menus and the album are static between key presses,
+        # so they do not need the preview's rate.
+        self.preview_redraw_interval = self._redraw_interval(
+            "PREVIEW_TARGET_FPS", PREVIEW_REDRAW_INTERVAL_SECONDS
+        )
+        self.menu_redraw_interval = self._redraw_interval(
+            "MENU_TARGET_FPS", MENU_REDRAW_INTERVAL_SECONDS
+        )
+        self.album_redraw_interval = self._redraw_interval(
+            "ALBUM_TARGET_FPS", ALBUM_REDRAW_INTERVAL_SECONDS
+        )
         self.capture_feedback_duration_seconds = max(
             0.05, float(os.environ.get("CAPTURE_FEEDBACK_DURATION_SECONDS", "0.25"))
         )
@@ -941,6 +957,19 @@ class ImageGenCamController:
                 "magic_prompt_ready": "true" if self.state.magic_prompt_ready else "false",
                 "camera_username": self.camera_username,
             }
+
+    @staticmethod
+    def _redraw_interval(name: str, default_interval: float) -> float:
+        """Seconds between redraws for a target-fps environment variable."""
+        try:
+            target = float(os.environ.get(name, "") or 0.0)
+        except ValueError:
+            target = 0.0
+        if target <= 0:
+            return default_interval
+        # 60 is well past what the SPI link can carry; it just stops a typo
+        # from turning the redraw budget into a busy loop.
+        return 1.0 / min(60.0, target)
 
     @staticmethod
     def _format_bytes(value: int) -> str:
@@ -4011,7 +4040,7 @@ class ImageGenCamController:
                         self._exit_to_preview()
                     elif (
                         self.last_drawn_mode != mode
-                        or (now - self.menu_last_redraw_at) >= MENU_REDRAW_INTERVAL_SECONDS
+                        or (now - self.menu_last_redraw_at) >= self.menu_redraw_interval
                     ):
                         self._render_capture_feedback_frame()
                         self.menu_last_redraw_at = now
@@ -4024,7 +4053,7 @@ class ImageGenCamController:
                         or self.preview_overlay_dirty
                         or (
                             frame_id != self.last_rendered_frame_id
-                            and (now - self.preview_last_redraw_at) >= PREVIEW_REDRAW_INTERVAL_SECONDS
+                            and (now - self.preview_last_redraw_at) >= self.preview_redraw_interval
                         )
                     ):
                         self._render_preview_frame()
@@ -4035,7 +4064,7 @@ class ImageGenCamController:
                 elif mode == "prompt_picker":
                     if (
                         self.last_drawn_mode != mode
-                        or (now - self.menu_last_redraw_at) >= MENU_REDRAW_INTERVAL_SECONDS
+                        or (now - self.menu_last_redraw_at) >= self.menu_redraw_interval
                     ):
                         self._render_prompt_picker_frame()
                         self.menu_last_redraw_at = now
@@ -4043,7 +4072,7 @@ class ImageGenCamController:
                 elif mode == "album":
                     if (
                         self.last_drawn_mode != mode
-                        or (now - self.album_last_redraw_at) >= ALBUM_REDRAW_INTERVAL_SECONDS
+                        or (now - self.album_last_redraw_at) >= self.album_redraw_interval
                     ):
                         self._render_album_frame()
                         self.album_last_redraw_at = now
@@ -4051,7 +4080,7 @@ class ImageGenCamController:
                 elif mode == "album_download":
                     if (
                         self.last_drawn_mode != mode
-                        or (now - self.album_last_redraw_at) >= ALBUM_REDRAW_INTERVAL_SECONDS
+                        or (now - self.album_last_redraw_at) >= self.album_redraw_interval
                     ):
                         self._render_album_download_frame()
                         self.album_last_redraw_at = now
@@ -4075,7 +4104,7 @@ class ImageGenCamController:
                 elif mode == "wifi_menu":
                     if (
                         self.last_drawn_mode != mode
-                        or (now - self.menu_last_redraw_at) >= MENU_REDRAW_INTERVAL_SECONDS
+                        or (now - self.menu_last_redraw_at) >= self.menu_redraw_interval
                     ):
                         self._render_wifi_menu_frame()
                         self.menu_last_redraw_at = now
@@ -4083,7 +4112,7 @@ class ImageGenCamController:
                 elif mode == "wifi_detail":
                     if (
                         self.last_drawn_mode != mode
-                        or (now - self.menu_last_redraw_at) >= MENU_REDRAW_INTERVAL_SECONDS
+                        or (now - self.menu_last_redraw_at) >= self.menu_redraw_interval
                     ):
                         self._render_wifi_detail_frame()
                         self.menu_last_redraw_at = now
@@ -4091,7 +4120,7 @@ class ImageGenCamController:
                 elif mode == "wifi_keyboard":
                     if (
                         self.last_drawn_mode != mode
-                        or (now - self.menu_last_redraw_at) >= MENU_REDRAW_INTERVAL_SECONDS
+                        or (now - self.menu_last_redraw_at) >= self.menu_redraw_interval
                     ):
                         self._render_wifi_keyboard_frame()
                         self.menu_last_redraw_at = now

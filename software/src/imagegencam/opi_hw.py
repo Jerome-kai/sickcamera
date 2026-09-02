@@ -138,7 +138,7 @@ class UsbCamera:
     def __init__(self) -> None:
         self._device_index = _env_int("CAMERA_DEVICE", 0)
         self._size = (480, 360)
-        self._frame_rate = 10.0
+        self._frame_rate = 15.0
         self._capture = None
         self._last_frame_at = 0.0
 

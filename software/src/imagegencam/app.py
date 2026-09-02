@@ -31,7 +31,7 @@ def main() -> None:
     input_height = int(os.environ.get("IMAGE_GEN_INPUT_HEIGHT", "768"))
     preview_width = int(os.environ.get("CAMERA_PREVIEW_WIDTH", "480"))
     preview_height = int(os.environ.get("CAMERA_PREVIEW_HEIGHT", "360"))
-    frame_rate = int(os.environ.get("CAMERA_FRAME_RATE", "10"))
+    frame_rate = int(os.environ.get("CAMERA_FRAME_RATE", "15"))
 
     prompt_store = PromptStore(project_root / "data" / "prompts.json")
     magic_history_store = MagicHistoryStore(project_root / "data" / "magic_history.json")

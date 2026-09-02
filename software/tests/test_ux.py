@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from threading import Lock
+from unittest import mock
 
 from imagegencam.config import SettingsStore
 from imagegencam.controller import TUTORIAL_PAGES, ImageGenCamController
@@ -218,6 +220,39 @@ class SleepTests(unittest.TestCase):
         # The first stale check after waking must not see the hours-old
         # timestamp from before the nap.
         self.assertGreater(stub.capture_last_frame_at, 10.0)
+
+
+class RedrawBudgetTests(unittest.TestCase):
+    """The preview rate is now configurable. Bad input must fall back rather
+    than turn the render loop into a busy spin."""
+
+    def test_an_unset_variable_uses_the_default(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("PREVIEW_TARGET_FPS", None)
+            self.assertAlmostEqual(
+                ImageGenCamController._redraw_interval("PREVIEW_TARGET_FPS", 1 / 8), 1 / 8
+            )
+
+    def test_a_target_becomes_its_interval(self) -> None:
+        with mock.patch.dict(os.environ, {"PREVIEW_TARGET_FPS": "20"}):
+            self.assertAlmostEqual(
+                ImageGenCamController._redraw_interval("PREVIEW_TARGET_FPS", 1 / 8), 1 / 20
+            )
+
+    def test_junk_and_zero_fall_back_instead_of_spinning(self) -> None:
+        for value in ("0", "-5", "abc", ""):
+            with self.subTest(value=value):
+                with mock.patch.dict(os.environ, {"PREVIEW_TARGET_FPS": value}):
+                    self.assertAlmostEqual(
+                        ImageGenCamController._redraw_interval("PREVIEW_TARGET_FPS", 1 / 8),
+                        1 / 8,
+                    )
+
+    def test_an_absurd_target_is_clamped(self) -> None:
+        with mock.patch.dict(os.environ, {"PREVIEW_TARGET_FPS": "100000"}):
+            interval = ImageGenCamController._redraw_interval("PREVIEW_TARGET_FPS", 1 / 8)
+        self.assertAlmostEqual(interval, 1 / 60)
+        self.assertGreater(interval, 0)
 
 
 class _ForgetStub:
