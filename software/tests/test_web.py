@@ -553,7 +553,9 @@ class RequestBodyLimitTests(unittest.TestCase):
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0), build_handler(_FakeController(root))
         )
-        Thread(target=self.server.serve_forever, daemon=True).start()
+        Thread(
+            target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        ).start()
         self.addCleanup(self.tmp.cleanup)
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)

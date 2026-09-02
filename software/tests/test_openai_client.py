@@ -270,6 +270,290 @@ class MagicChatModeTests(unittest.TestCase):
             self.assertEqual(OpenAIMagicPromptPlanner().api_mode, "responses")
 
 
+class _FakeImages:
+    """Stands in for client.images, capturing the request the editor builds."""
+
+    def __init__(self, result=None, error: Exception | None = None) -> None:
+        self.result = result
+        self.error = error
+        self.captured_kwargs: dict | None = None
+        self.handles: list = []
+
+    def edit(self, **kwargs):
+        self.captured_kwargs = kwargs
+        image = kwargs.get("image")
+        self.handles = list(image) if isinstance(image, list) else [image]
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def _image_result(payload: bytes, attribute: str = "b64_json"):
+    encoded = base64.b64encode(payload).decode("ascii")
+    return types.SimpleNamespace(data=[types.SimpleNamespace(**{attribute: encoded})])
+
+
+class EditsModeTests(unittest.TestCase):
+    """The default API mode -- the one a stock .env uses -- reaches
+    /v1/images/edits. The chat and generations modes are covered above."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.source = self.dir / "source.png"
+        self.source.write_bytes(_png_bytes())
+        self.output = self.dir / "result.jpg"
+        # _require_client re-reads the environment on every call and hands back
+        # the cached client only when the key and base URL still match.
+        env = mock.patch.dict(os.environ, {"OPENAI_API_KEY": "key", "OPENAI_BASE_URL": ""})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _editor(self, images: _FakeImages, **kwargs) -> OpenAIImageEditor:
+        editor = OpenAIImageEditor(**kwargs)
+        editor._client = types.SimpleNamespace(images=images)
+        editor._client_config = ("key", None)
+        return editor
+
+    def _reference(self, name: str) -> Path:
+        path = self.dir / name
+        path.write_bytes(_png_bytes())
+        return path
+
+    def test_the_edit_request_carries_the_configured_options(self) -> None:
+        images = _FakeImages(_image_result(b"generated-bytes"))
+        editor = self._editor(images, model="gpt-image-1", quality="high", size="1536x1024")
+
+        editor.edit_image(source_path=self.source, prompt="make it neon", output_path=self.output)
+
+        sent = images.captured_kwargs
+        self.assertEqual(sent["model"], "gpt-image-1")
+        self.assertEqual(sent["quality"], "high")
+        self.assertEqual(sent["size"], "1536x1024")
+        self.assertEqual(sent["output_format"], "jpeg")
+        self.assertIn("make it neon", sent["prompt"])
+
+    def test_an_explicit_size_overrides_the_configured_one(self) -> None:
+        images = _FakeImages(_image_result(b"generated-bytes"))
+        editor = self._editor(images, size="1024x1024")
+
+        editor.edit_image(
+            source_path=self.source, prompt="p", output_path=self.output, size="1024x1536"
+        )
+
+        self.assertEqual(images.captured_kwargs["size"], "1024x1536")
+
+    def test_the_generated_bytes_land_at_the_output_path(self) -> None:
+        images = _FakeImages(_image_result(b"generated-bytes"))
+        editor = self._editor(images)
+
+        returned = editor.edit_image(
+            source_path=self.source, prompt="p", output_path=self.output
+        )
+
+        self.assertEqual(returned, self.output)
+        self.assertEqual(self.output.read_bytes(), b"generated-bytes")
+        # Written through a temp file and renamed, so no .part is left behind.
+        self.assertEqual(list(self.dir.glob("*.part")), [])
+
+    def test_an_older_model_asks_for_low_input_fidelity(self) -> None:
+        images = _FakeImages(_image_result(b"x"))
+
+        self._editor(images, model="gpt-image-1").edit_image(
+            source_path=self.source, prompt="p", output_path=self.output
+        )
+
+        self.assertEqual(images.captured_kwargs["input_fidelity"], "low")
+
+    def test_gpt_image_2_is_sent_without_the_input_fidelity_hint(self) -> None:
+        for model in ("gpt-image-2", "gpt-image-2-2026-04-21"):
+            with self.subTest(model=model):
+                images = _FakeImages(_image_result(b"x"))
+
+                self._editor(images, model=model).edit_image(
+                    source_path=self.source, prompt="p", output_path=self.output
+                )
+
+                self.assertNotIn("input_fidelity", images.captured_kwargs)
+
+    def test_a_gateway_prefixed_model_is_recognised_as_the_same_model(self) -> None:
+        # Gateways prefix the vendor ("openai/gpt-image-2"). Matching on the
+        # whole string would send input_fidelity to a model that rejects it.
+        images = _FakeImages(_image_result(b"x"))
+
+        self._editor(images, model="openai/gpt-image-2").edit_image(
+            source_path=self.source, prompt="p", output_path=self.output
+        )
+
+        self.assertNotIn("input_fidelity", images.captured_kwargs)
+
+    def test_lossy_formats_carry_a_compression_level(self) -> None:
+        for output_format in ("jpeg", "webp"):
+            with self.subTest(output_format=output_format):
+                images = _FakeImages(_image_result(b"x"))
+
+                self._editor(
+                    images, output_format=output_format, output_compression=70
+                ).edit_image(source_path=self.source, prompt="p", output_path=self.output)
+
+                self.assertEqual(images.captured_kwargs["output_compression"], 70)
+
+    def test_png_is_sent_without_a_compression_level(self) -> None:
+        images = _FakeImages(_image_result(b"x"))
+
+        self._editor(images, output_format="png").edit_image(
+            source_path=self.source, prompt="p", output_path=self.output
+        )
+
+        self.assertNotIn("output_compression", images.captured_kwargs)
+
+    def test_reference_images_are_sent_after_the_camera_photo(self) -> None:
+        images = _FakeImages(_image_result(b"x"))
+        references = [self._reference("ref-a.png"), self._reference("ref-b.png")]
+
+        self._editor(images).edit_image(
+            source_path=self.source,
+            prompt="p",
+            output_path=self.output,
+            reference_paths=references,
+        )
+
+        self.assertEqual(len(images.captured_kwargs["image"]), 3)
+        # The wording has to tell the model which of the three is the photo.
+        self.assertIn("first attached image", images.captured_kwargs["prompt"])
+
+    def test_a_reference_that_is_not_on_disk_is_dropped(self) -> None:
+        images = _FakeImages(_image_result(b"x"))
+
+        self._editor(images).edit_image(
+            source_path=self.source,
+            prompt="p",
+            output_path=self.output,
+            reference_paths=[self.dir / "missing.png"],
+        )
+
+        # A single handle, not a list: no references survived the filter.
+        self.assertFalse(isinstance(images.captured_kwargs["image"], list))
+
+    def test_reference_handles_are_closed_after_a_successful_edit(self) -> None:
+        images = _FakeImages(_image_result(b"x"))
+
+        self._editor(images).edit_image(
+            source_path=self.source,
+            prompt="p",
+            output_path=self.output,
+            reference_paths=[self._reference("ref.png")],
+        )
+
+        self.assertTrue(all(handle.closed for handle in images.handles))
+
+    def test_reference_handles_are_closed_even_when_the_api_call_fails(self) -> None:
+        # The camera retries failed jobs for hours; leaking a descriptor per
+        # attempt eventually exhausts the process limit on the device.
+        images = _FakeImages(error=RuntimeError("upstream refused"))
+        editor = self._editor(images)
+
+        with self.assertRaises(RuntimeError):
+            editor.edit_image(
+                source_path=self.source,
+                prompt="p",
+                output_path=self.output,
+                reference_paths=[self._reference("ref.png")],
+            )
+
+        self.assertTrue(all(handle.closed for handle in images.handles))
+        self.assertFalse(self.output.exists())
+
+    def test_an_alternative_encoding_field_is_accepted(self) -> None:
+        # Some OpenAI-compatible providers name the field image_base64.
+        images = _FakeImages(_image_result(b"generated-bytes", attribute="image_base64"))
+
+        self._editor(images).edit_image(
+            source_path=self.source, prompt="p", output_path=self.output
+        )
+
+        self.assertEqual(self.output.read_bytes(), b"generated-bytes")
+
+    def test_a_response_with_no_image_is_reported_clearly(self) -> None:
+        images = _FakeImages(types.SimpleNamespace(data=[]))
+
+        with self.assertRaises(OpenAIImageError):
+            self._editor(images).edit_image(
+                source_path=self.source, prompt="p", output_path=self.output
+            )
+
+        self.assertFalse(self.output.exists())
+
+
+class ResponsesModePlannerTests(unittest.TestCase):
+    """The default magic-prompt path: /v1/responses with a strict JSON schema."""
+
+    def setUp(self) -> None:
+        env = mock.patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "key", "OPENAI_BASE_URL": "", "MAGIC_MODE_API": "responses"},
+        )
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _plan(self, output_text: str, **kwargs) -> tuple[dict, dict]:
+        captured: dict = {}
+
+        def create(**request):
+            captured.update(request)
+            return types.SimpleNamespace(output_text=output_text)
+
+        planner = OpenAIMagicPromptPlanner(**kwargs)
+        planner._client = types.SimpleNamespace(responses=types.SimpleNamespace(create=create))
+        planner._client_config = ("key", None)
+        tmp = Path(tempfile.mkdtemp())
+        reference = tmp / "reference.png"
+        reference.write_bytes(_png_bytes())
+        return planner.create_magic_prompt(reference), captured
+
+    def test_the_planner_defaults_to_the_responses_endpoint(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(OpenAIMagicPromptPlanner().api_mode, "responses")
+
+    def test_a_planned_prompt_is_parsed_from_the_response(self) -> None:
+        result, _ = self._plan('{"title": "Neon", "prompt": "Make it neon"}')
+
+        self.assertEqual(result["title"], "Neon")
+        self.assertEqual(result["prompt"], "Make it neon")
+
+    def test_the_photo_is_sent_inline_with_the_instruction(self) -> None:
+        _, captured = self._plan('{"title": "Neon", "prompt": "Make it neon"}')
+
+        content = captured["input"][0]["content"]
+        self.assertEqual(content[0]["type"], "input_text")
+        self.assertEqual(content[1]["type"], "input_image")
+        self.assertTrue(content[1]["image_url"].startswith("data:image/"))
+
+    def test_the_request_pins_a_strict_json_schema(self) -> None:
+        # Without strict mode the model prefaces the JSON with prose and the
+        # parse fails, which on the device shows as magic mode doing nothing.
+        _, captured = self._plan('{"title": "Neon", "prompt": "Make it neon"}')
+
+        schema_format = captured["text"]["format"]
+        self.assertEqual(schema_format["type"], "json_schema")
+        self.assertTrue(schema_format["strict"])
+        self.assertEqual(sorted(schema_format["schema"]["required"]), ["prompt", "title"])
+
+    def test_an_empty_response_is_reported_rather_than_saved(self) -> None:
+        with self.assertRaises(OpenAIImageError):
+            self._plan("")
+
+    def test_a_long_title_is_trimmed_to_fit_the_display(self) -> None:
+        result, _ = self._plan(
+            '{"title": "An extremely long title that will not fit", "prompt": "p"}',
+            title_max_length=10,
+        )
+
+        self.assertLessEqual(len(result["title"]), 10)
+
+
+
 def _dict_to_namespace(value):
     if isinstance(value, dict):
         return types.SimpleNamespace(**{k: _dict_to_namespace(v) for k, v in value.items()})

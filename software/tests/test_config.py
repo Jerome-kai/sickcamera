@@ -284,5 +284,105 @@ class DurableStoreTests(unittest.TestCase):
             self.assertEqual(store.load_entries(), [])
 
 
+class PersistentJobStoreResilienceTests(unittest.TestCase):
+    """The queue is read back after power loss, so every entry on disk is
+    potentially half-written -- one bad file must not stall the whole queue."""
+
+    def _store(self, tmp: str) -> PersistentJobStore:
+        return PersistentJobStore(Path(tmp) / "jobs")
+
+    def test_a_corrupt_entry_is_skipped_rather_than_blocking_the_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            store.save_entry(
+                "good",
+                {"created_at": "2026-05-08T12:00:00", "next_attempt_at": "2026-05-08T12:00:00"},
+            )
+            (store.path / "broken.json").write_text("{ truncated", encoding="utf-8")
+
+            job_id, _ = store.next_due_entry(datetime(2026, 5, 8, 12, 30)) or ("", {})
+
+            self.assertEqual(job_id, "good")
+
+    def test_an_entry_that_is_not_an_object_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            (store.path / "listy.json").write_text("[1, 2, 3]", encoding="utf-8")
+
+            self.assertIsNone(store.next_due_entry(datetime(2026, 5, 8, 12, 30)))
+
+    def test_an_entry_with_no_id_falls_back_to_its_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            (store.path / "orphan.json").write_text(
+                '{"next_attempt_at": "2026-05-08T12:00:00"}', encoding="utf-8"
+            )
+
+            job_id, payload = store.next_due_entry(datetime(2026, 5, 8, 12, 30)) or ("", {})
+
+            self.assertEqual(job_id, "orphan")
+            self.assertEqual(payload["id"], "orphan")
+
+    def test_an_entry_with_an_unreadable_timestamp_is_treated_as_overdue(self) -> None:
+        # Better to retry a job with a mangled timestamp than to strand it in
+        # the queue forever, keeping the badge lit with work that never runs.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            store.save_entry("odd", {"created_at": "", "next_attempt_at": "not-a-date"})
+
+            job_id, _ = store.next_due_entry(datetime(2026, 5, 8, 12, 30)) or ("", {})
+
+            self.assertEqual(job_id, "odd")
+
+    def test_a_job_that_is_not_due_yet_is_left_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            store.save_entry("later", {"next_attempt_at": "2026-05-08T13:00:00"})
+
+            self.assertIsNone(store.next_due_entry(datetime(2026, 5, 8, 12, 0)))
+
+    def test_loading_a_missing_entry_returns_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(self._store(tmp).load_entry("never-existed"))
+
+    def test_loading_a_corrupt_entry_returns_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            (store.path / "broken.json").write_text("{ truncated", encoding="utf-8")
+
+            self.assertIsNone(store.load_entry("broken"))
+
+    def test_loading_an_entry_that_is_not_an_object_returns_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            (store.path / "listy.json").write_text("[]", encoding="utf-8")
+
+            self.assertIsNone(store.load_entry("listy"))
+
+    def test_a_saved_entry_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+
+            saved = store.save_entry("alpha", {"prompt": "neon"})
+
+            self.assertEqual(saved["id"], "alpha")
+            self.assertEqual(store.load_entry("alpha"), {"prompt": "neon", "id": "alpha"})
+
+    def test_deleting_an_entry_that_is_already_gone_is_harmless(self) -> None:
+        # Two workers can finish the same job after a restart.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._store(tmp).delete_entry("never-existed")
+
+    def test_saving_leaves_no_temp_file_behind(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+
+            store.save_entry("alpha", {"prompt": "neon"})
+
+            self.assertEqual(list(store.path.glob("*.tmp")), [])
+            self.assertEqual(store.count(), 1)
+
+
+
 if __name__ == "__main__":
     unittest.main()

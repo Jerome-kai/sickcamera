@@ -15,6 +15,7 @@ software/.pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
+*.egg-info/
 software/data/captures/*
 !software/data/captures/.gitkeep
 software/data/generated/*
