@@ -19,6 +19,8 @@ SUDOERS_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-nmcli.sudoers"
 SUDOERS_PATH="/etc/sudoers.d/imagegencam-nmcli"
 UDEV_RULES_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/99-imagegencam-hw.rules"
 UDEV_RULES_PATH="/etc/udev/rules.d/99-imagegencam-hw.rules"
+SPIDEV_CONF_TEMPLATE_PATH="${PROJECT_ROOT}/deploy/imagegencam-spidev.conf"
+SPIDEV_CONF_PATH="/etc/modprobe.d/imagegencam-spidev.conf"
 WIFI_INTERFACE="${WIFI_INTERFACE:-wlan0}"
 # Override with SERVICE_USER=root on the legacy 4.9 kernel (sysfs GPIO + /dev/mem
 # pull-ups need root there); default is the invoking user.
@@ -150,6 +152,19 @@ sudo groupadd -f gpio
 sudo groupadd -f spi
 sudo usermod -aG gpio,spi,video "${USER}"
 sudo install -m 0644 "${UDEV_RULES_TEMPLATE_PATH}" "${UDEV_RULES_PATH}"
+
+# Bigger spidev buffer: fewer, larger transfers per display frame. Takes effect
+# on the next reboot (or modprobe -r spidev && modprobe spidev).
+sudo install -m 0644 "${SPIDEV_CONF_TEMPLATE_PATH}" "${SPIDEV_CONF_PATH}"
+if [[ -r /sys/module/spidev/parameters/bufsiz ]]; then
+  CURRENT_BUFSIZ="$(cat /sys/module/spidev/parameters/bufsiz 2>/dev/null || echo '?')"
+  if [[ "${CURRENT_BUFSIZ}" != "65536" ]]; then
+    echo "spidev bufsiz is ${CURRENT_BUFSIZ}; 65536 applies after a reboot."
+    echo "If it stays put, spidev is built into the kernel -- add"
+    echo "  spidev.bufsiz=65536"
+    echo "to extraargs= in /boot/armbianEnv.txt instead."
+  fi
+fi
 sudo udevadm control --reload
 sudo udevadm trigger --subsystem-match=spidev --subsystem-match=gpio || true
 

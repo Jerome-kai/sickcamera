@@ -324,7 +324,24 @@ Defaults are `PREVIEW_TARGET_FPS=15`, `CAMERA_FRAME_RATE=15`, with menus and the
 album at 10 (they are static between key presses, so spending SPI bandwidth on
 them buys nothing).
 
-To go faster you have to raise the SPI clock first:
+### Two levers, in order
+
+**1. Transfer size (free, no signal-integrity risk).** spidev's default buffer
+is 4096 bytes, so one frame is pushed as **75 separate transfers** with the
+clock idling between each — overhead stacked on top of the bit time. A 64 KB
+buffer cuts that to 5. `install_service.sh` writes
+`/etc/modprobe.d/imagegencam-spidev.conf` for you; it takes effect on the next
+reboot. Confirm with:
+
+```bash
+cat /sys/module/spidev/parameters/bufsiz     # want 65536
+```
+
+If it still reads 4096, spidev is built into your kernel rather than a module —
+add `spidev.bufsiz=65536` to the `extraargs=` line in `/boot/armbianEnv.txt`
+and reboot.
+
+**2. Clock rate (has a wiring limit).**
 
 | `DISPLAY_SPI_HZ` | Frame time | Ceiling |
 |---|---|---|
@@ -337,6 +354,32 @@ Most ST7796 modules run happily at 50 MHz. Raise it, then raise
 speckled or colour-shifted frames, the clock is too high for your wiring** —
 step back down. Long or untwisted SPI jumpers are the usual limit; the carrier
 PCB planned for v2 should tolerate more than dupont wires do.
+
+### Measure, don't guess
+
+`scripts/display_benchmark.py` times real frames and separates the two costs:
+
+```bash
+sudo systemctl stop imagegencam        # it holds the SPI bus and GPIO
+./scripts/display_benchmark.py
+sudo systemctl start imagegencam
+```
+
+It prints theoretical bit time, measured frame time, and the gap. A large gap
+(>20 ms) is transfer overhead — fix the buffer first. A small gap (<10 ms) means
+you are at the wire limit, and only a higher clock or better wiring helps.
+
+### Why not HDMI?
+
+The board has HDMI, and the H616 drives it at 1080p60 without effort — but it is
+a **separate output**, not a faster path to the SPI panel. Sending frames to
+HDMI does nothing for the 3.5" screen in the camera's hand grip, which is the
+one the photographer looks through. HDMI is worth wiring up for a *different*
+feature (plug the camera into a TV to show the gallery), not for viewfinder
+frame rate. Nothing on this board offers a faster small-panel interface: the
+Zero 2 has no MIPI-DSI connector, and its 26-pin header does not expose enough
+lines for a parallel RGB panel, so SPI is the practical option and ~25 fps is
+its realistic ceiling.
 
 Check what the camera can actually deliver before raising `CAMERA_FRAME_RATE`:
 
