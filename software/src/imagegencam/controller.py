@@ -28,7 +28,13 @@ from urllib.parse import quote, unquote
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 import qrcode
 
-from .config import MagicHistoryStore, PromptStore, SettingsStore, write_json_atomic
+from .config import (
+    MagicHistoryStore,
+    ModelPresetStore,
+    PromptStore,
+    SettingsStore,
+    write_json_atomic,
+)
 from .job_store import PersistentJobStore
 from .openai_client import OpenAIImageEditor, OpenAIImageError, OpenAIMagicPromptPlanner
 from .web import delete_cached_thumbnail
@@ -164,6 +170,7 @@ class ImageGenCamController:
         preview_size: tuple[int, int],
         frame_rate: int,
         generation_input_size: tuple[int, int],
+        model_preset_store: ModelPresetStore | None = None,
     ) -> None:
         self.project_root = project_root
         self.prompt_store = prompt_store
@@ -200,6 +207,19 @@ class ImageGenCamController:
         settings = self.settings_store.load()
         self.app_background_theme = str(settings["app_background_theme"])
         self.camera_username = str(settings["camera_username"])
+        self.model_preset_store = model_preset_store
+        self.model_presets = (
+            model_preset_store.load_entries() if model_preset_store is not None else []
+        )
+        self.model_index = 0
+        self.model_picker_index = 0
+        # The picker is a transient overlay, like a lens dial: it appears while
+        # the wheel turns and fades back to the viewfinder on its own.
+        self.model_picker_until = 0.0
+        self.model_picker_hold_seconds = float(
+            os.environ.get("MODEL_WHEEL_HOLD_SECONDS", "2.5")
+        )
+        self.model_wheel = None
         self.tutorial_seen = bool(int(settings["tutorial_seen"]))
         self.tutorial_index = 0
         # Idle screen sleep: no shutdown button exists yet (the power switch is
@@ -388,6 +408,8 @@ class ImageGenCamController:
         self._setup_camera()
         self._setup_buttons()
         self._setup_hot_shoe()
+        self._setup_model_wheel()
+        self._apply_selected_model()
         self._setup_pisugar_battery_bus()
         self.pisugar_shortcut_button_configured = self._configure_pisugar_shortcut_button()
         self.capture_worker_thread = Thread(target=self._capture_worker_loop, daemon=True)
@@ -495,6 +517,142 @@ class ImageGenCamController:
             logger.info("Hot shoe trigger ready on line %s", self.hot_shoe.pin)
         except Exception:
             logger.exception("Hot shoe setup failed; continuing without flash")
+
+    def _setup_model_wheel(self) -> None:
+        """Optional rotary encoder for picking the image model."""
+        if os.environ.get("MODEL_WHEEL_ENABLED", "0").strip().lower() not in {
+            "1", "true", "yes", "on",
+        }:
+            return
+        if len(self.model_presets) < 2:
+            logger.info(
+                "Model wheel enabled but only %d model configured; add more to "
+                "data/models.json to give it something to turn to",
+                len(self.model_presets),
+            )
+        wheel_cls = getattr(self.displayhatmini, "RotaryEncoder", None)
+        if wheel_cls is None:
+            logger.warning("MODEL_WHEEL_ENABLED is set but this hardware stack has no wheel support")
+            return
+        try:
+            self.model_wheel = wheel_cls()
+        except Exception:
+            # A miswired or absent encoder must not stop the camera working.
+            logger.exception("Model wheel setup failed; continuing without it")
+            return
+        logger.info(
+            "Model wheel ready on lines %s/%s", self.model_wheel.pin_a, self.model_wheel.pin_b
+        )
+
+    def current_model_preset(self) -> dict[str, str] | None:
+        if not self.model_presets:
+            return None
+        self.model_index = max(0, min(self.model_index, len(self.model_presets) - 1))
+        return self.model_presets[self.model_index]
+
+    def _apply_selected_model(self) -> None:
+        """Point the image editor at the selected preset.
+
+        Safe to call at any time: the OpenAI client is cached on api key and
+        base URL, not on the model, so switching costs nothing and does not
+        disturb a generation already in flight (the worker holds its own
+        reference to the prompt and paths, and image_edit_lock serialises the
+        calls themselves).
+        """
+        preset = self.current_model_preset()
+        if preset is None:
+            return
+        self.image_editor.model = preset["model"]
+        self.image_editor.api_mode = preset["api"]
+        logger.info("Image model set to %s (api=%s)", preset["model"], preset["api"])
+
+    def _poll_model_wheel(self, now: float) -> None:
+        if self.model_wheel is None:
+            return
+        try:
+            detents = self.model_wheel.poll()
+        except Exception:
+            logger.exception("Model wheel read failed; disabling it")
+            self.model_wheel = None
+            return
+        if detents:
+            self.last_user_activity = now
+            self._queue_ui_event("model_next" if detents > 0 else "model_prev")
+
+    def _scroll_model_picker(self, delta: int) -> None:
+        """Turn the wheel: open the picker if needed and move the selection."""
+        if not self.model_presets:
+            return
+        now = time.monotonic()
+        mode = self.get_status_snapshot()["mode"]
+        if mode != "model_picker":
+            # First click only opens the picker, so the model does not change
+            # before the owner can see what they are changing it from.
+            self.model_picker_index = self.model_index
+            with self.state_lock:
+                self.state.mode = "model_picker"
+        else:
+            self.model_picker_index = (self.model_picker_index + delta) % len(self.model_presets)
+            self.model_index = self.model_picker_index
+            self._apply_selected_model()
+        self.model_picker_until = now + self.model_picker_hold_seconds
+        preset = self.current_model_preset()
+        with self.state_lock:
+            self.state.status_message = f"Model: {preset['label']}" if preset else "Model"
+        self.last_drawn_mode = None
+
+    def _render_model_picker_frame(self) -> None:
+        screen = self._get_modal_background().convert("RGBA")
+        screen = self._apply_glass_panel(
+            screen,
+            (44, 20, WIDTH - 44, HEIGHT - 20),
+            radius=18,
+            fill=(255, 255, 255, 202),
+            outline=(255, 255, 255, 236),
+        )
+        draw = ImageDraw.Draw(screen)
+        title_font = self._load_font(14)
+        item_font = self._load_font(12)
+        meta_font = self._load_font(9)
+        draw.text((62, 32), "Model", font=title_font, fill=(18, 18, 18))
+
+        visible = 4
+        total = len(self.model_presets)
+        first = max(0, min(self.model_picker_index - visible // 2, max(0, total - visible)))
+        y = 58
+        for offset in range(min(visible, total)):
+            index = first + offset
+            preset = self.model_presets[index]
+            active = index == self.model_index
+            box = (60, y, WIDTH - 60, y + 30)
+            screen = self._apply_glass_panel(
+                screen,
+                box,
+                radius=10,
+                fill=(20, 20, 20, 228) if active else (255, 255, 255, 148),
+                outline=(20, 20, 20, 245) if active else (255, 255, 255, 230),
+                width=2,
+            )
+            draw = ImageDraw.Draw(screen)
+            draw.text(
+                (box[0] + 10, box[1] + 8),
+                self._truncate_text_pixels(preset["label"], item_font, box[2] - box[0] - 46),
+                font=item_font,
+                fill=(255, 255, 255) if active else (24, 24, 24),
+            )
+            draw.text(
+                (box[2] - 34, box[1] + 10),
+                preset["api"][:4],
+                font=meta_font,
+                fill=(210, 210, 210) if active else (90, 90, 90),
+            )
+            y += 34
+        if total > visible:
+            draw.text(
+                (WIDTH - 96, 34), f"{self.model_index + 1}/{total}", font=meta_font, fill=(60, 60, 60)
+            )
+        draw.text((62, HEIGHT - 32), "turn the wheel to change", font=meta_font, fill=(60, 60, 60))
+        self._render_to_display(screen.convert("RGB"))
 
     def _grab_capture_frames(self) -> tuple[Image.Image | None, Image.Image | None]:
         """Copy the current preview frames for a capture. With a hot shoe
@@ -1006,6 +1164,7 @@ class ImageGenCamController:
             "storage_free_bytes": disk.free,
             "storage_total_bytes": disk.total,
             "cpu_status": f"{cpu_value}%" if cpu_value is not None else "Unknown",
+            "image_model": (preset["label"] if (preset := self.current_model_preset()) else "Unknown"),
         }
 
     def get_app_background_theme(self) -> str:
@@ -3857,6 +4016,16 @@ class ImageGenCamController:
                 self._finish_tutorial()
             return
 
+        if event in {"model_next", "model_prev"}:
+            self._scroll_model_picker(1 if event == "model_next" else -1)
+            return
+
+        if mode == "model_picker":
+            # Any button dismisses the picker and goes straight back to the
+            # viewfinder; the model is already applied.
+            self._exit_to_preview()
+            return
+
         if event == "magic_shutter":
             if mode in {"preview", "capture_feedback"}:
                 self._queue_magic_prompt_from_current_frame()
@@ -4002,6 +4171,7 @@ class ImageGenCamController:
                 self._maybe_configure_pisugar_button()
 
                 self._poll_buttons()
+                self._poll_model_wheel(now)
                 self._poll_shutter_button(now)
                 self._poll_external_shutter_events()
                 self._poll_pisugar_power_button(now)
@@ -4159,6 +4329,12 @@ class ImageGenCamController:
 
     def shutdown(self) -> None:
         self.running = False
+        if self.model_wheel is not None:
+            try:
+                self.model_wheel.close()
+            except Exception:
+                logger.exception("Model wheel release failed")
+            self.model_wheel = None
         try:
             self.capture_queue.put_nowait(None)
         except Exception:

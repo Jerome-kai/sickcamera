@@ -1052,6 +1052,7 @@ def build_device_details(controller) -> dict[str, object]:
         "app_url": "Unknown",
         "storage_status": "Unknown",
         "cpu_status": "Unknown",
+        "image_model": "Unknown",
     }
 
 

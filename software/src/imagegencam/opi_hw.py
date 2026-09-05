@@ -132,6 +132,63 @@ class HotShoe:
                 release()
 
 
+class RotaryEncoder:
+    """Quadrature wheel (KY-040 style) read by polling.
+
+    The main loop already polls the buttons at ~200Hz, which is far faster
+    than a hand can turn a detented encoder, so there is no need for interrupts
+    -- and the legacy 4.9 kernel does not give us edge callbacks anyway.
+
+    Decoding is a transition table rather than the common "watch A, sample B"
+    trick: that shortcut miscounts on contact bounce, and a wheel that jumps
+    two models when you turn it one click is worse than no wheel.
+    """
+
+    # State is (A << 1) | B. Clockwise runs 00 -> 10 -> 11 -> 01 -> 00.
+    _STEPS = {
+        (0b00, 0b10): 1, (0b10, 0b11): 1, (0b11, 0b01): 1, (0b01, 0b00): 1,
+        (0b00, 0b01): -1, (0b01, 0b11): -1, (0b11, 0b10): -1, (0b10, 0b00): -1,
+    }
+
+    def __init__(self) -> None:
+        self.pin_a = _env_int("MODEL_WHEEL_A_PIN", 226)  # PH2, header pin 8
+        self.pin_b = _env_int("MODEL_WHEEL_B_PIN", 227)  # PH3, header pin 10
+        # Most detented encoders complete a full quadrature cycle per click.
+        # Set to 1 or 2 for a smoother wheel that reports more often.
+        self.detent_steps = max(1, _env_int("MODEL_WHEEL_DETENT_STEPS", 4))
+        self._inputs = sunxi_gpio.request_inputs(
+            [self.pin_a, self.pin_b], consumer="imagegencam-wheel", pull_up=True
+        )
+        self._state = self._read_state()
+        self._pending = 0
+
+    def _read_state(self) -> int:
+        return (int(self._inputs.is_high(self.pin_a)) << 1) | int(
+            self._inputs.is_high(self.pin_b)
+        )
+
+    def poll(self) -> int:
+        """Detents turned since the last call. Positive is clockwise."""
+        state = self._read_state()
+        if state != self._state:
+            # An unlisted pair means a transition was missed (bounce, or a
+            # very fast flick). Dropping it beats guessing a direction.
+            self._pending += self._STEPS.get((self._state, state), 0)
+            self._state = state
+        if abs(self._pending) < self.detent_steps:
+            return 0
+        # Truncate toward zero so a partial turn stays pending rather than
+        # rounding into a step the user did not complete.
+        detents = int(self._pending / self.detent_steps)
+        self._pending -= detents * self.detent_steps
+        return detents
+
+    def close(self) -> None:
+        release = getattr(self._inputs, "release", None)
+        if release:
+            release()
+
+
 class UsbCamera:
     """V4L2 USB camera behind the small Picamera2 surface the controller uses."""
 

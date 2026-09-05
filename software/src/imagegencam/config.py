@@ -117,6 +117,90 @@ DEFAULT_SETTINGS = {
 
 VALID_APP_BACKGROUND_THEMES = {"aqua", "silver", "lavender", "mint", "sunset"}
 
+MODEL_LABEL_MAX_LENGTH = 18
+VALID_IMAGE_GEN_APIS = {"edits", "chat", "generations"}
+
+
+def default_model_presets() -> list[dict[str, str]]:
+    """One preset describing whatever .env is already configured for.
+
+    Seeding from the environment means a camera with no models.json behaves
+    exactly as it did before the wheel existed -- the wheel just has nothing
+    to turn to yet.
+    """
+    model = os.environ.get("IMAGE_GEN_MODEL", "gpt-image-2").strip() or "gpt-image-2"
+    api = os.environ.get("IMAGE_GEN_API", "edits").strip().lower()
+    return [
+        {
+            "id": "default",
+            # The bare model name reads better on a 3.5" screen than the
+            # provider-prefixed one a gateway needs.
+            "label": model.split("/")[-1],
+            "model": model,
+            "api": api if api in VALID_IMAGE_GEN_APIS else "edits",
+        }
+    ]
+
+
+def _normalize_model_label(value: object, fallback: str) -> str:
+    cleaned = " ".join(str(value or "").split())
+    if not cleaned:
+        cleaned = fallback
+    return cleaned[:MODEL_LABEL_MAX_LENGTH].strip() or fallback
+
+
+def normalize_model_presets(presets: object) -> list[dict[str, str]]:
+    """Clean a model list, dropping entries with no model name.
+
+    Returns the env-derived default when nothing usable survives, so the
+    camera always has exactly one known-good model to fall back on.
+    """
+    if not isinstance(presets, list):
+        return default_model_presets()
+
+    cleaned: list[dict[str, str]] = []
+    used_ids: set[str] = set()
+    for index, entry in enumerate(presets, start=1):
+        if not isinstance(entry, dict):
+            continue
+        model = str(entry.get("model") or "").strip()
+        if not model:
+            continue
+        api = str(entry.get("api") or "").strip().lower()
+        cleaned.append(
+            {
+                "id": _normalize_prompt_id(entry.get("id"), used_ids, index),
+                "label": _normalize_model_label(entry.get("label"), model.split("/")[-1]),
+                "model": model,
+                "api": api if api in VALID_IMAGE_GEN_APIS else "edits",
+            }
+        )
+    return cleaned or default_model_presets()
+
+
+class ModelPresetStore:
+    """The models the physical wheel selects between."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._lock = Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists():
+            self.save_entries(default_model_presets())
+
+    def load_entries(self) -> list[dict[str, str]]:
+        with self._lock:
+            data = read_json_or_default(self.path, None)
+        if data is None:
+            return default_model_presets()
+        return normalize_model_presets(data)
+
+    def save_entries(self, presets: object) -> list[dict[str, str]]:
+        cleaned = normalize_model_presets(presets)
+        with self._lock:
+            write_json_atomic(self.path, cleaned)
+        return cleaned
+
 
 def _clamp_int(value: object, default: int, minimum: int, maximum: int) -> int:
     try:

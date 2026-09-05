@@ -4,7 +4,13 @@ import logging
 import os
 from pathlib import Path
 
-from .config import MagicHistoryStore, PromptStore, SettingsStore, load_env_file
+from .config import (
+    MagicHistoryStore,
+    ModelPresetStore,
+    PromptStore,
+    SettingsStore,
+    load_env_file,
+)
 from .controller import ImageGenCamController
 from .job_store import PersistentJobStore
 from .openai_client import OpenAIImageEditor, OpenAIMagicPromptPlanner
@@ -37,6 +43,9 @@ def main() -> None:
     magic_history_store = MagicHistoryStore(project_root / "data" / "magic_history.json")
     settings_store = SettingsStore(project_root / "data" / "settings.json")
     generation_job_store = PersistentJobStore(project_root / "data" / "queue" / "generation")
+    # Seeded from IMAGE_GEN_MODEL/IMAGE_GEN_API on first run, so a camera with
+    # no models.json behaves exactly as before.
+    model_preset_store = ModelPresetStore(project_root / "data" / "models.json")
     controller = ImageGenCamController(
         project_root=project_root,
         prompt_store=prompt_store,
@@ -58,6 +67,7 @@ def main() -> None:
         preview_size=(preview_width, preview_height),
         frame_rate=frame_rate,
         generation_input_size=(input_width, input_height),
+        model_preset_store=model_preset_store,
     )
     web_server = WebServerThread(controller, host, port)
     web_server.start()

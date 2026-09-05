@@ -88,6 +88,65 @@ enabled in software; pressed = line to ground. No resistors needed.
 All pin assignments are overridable in `.env` (`BUTTON_*_PIN`, `DISPLAY_*_PIN`) if your
 chassis routing prefers different pins.
 
+## Model wheel (optional)
+
+A rotary encoder that picks which AI model the shutter uses — turn it like a
+lens dial, the model list appears on screen, and it fades back to the viewfinder
+on its own. Off unless `MODEL_WHEEL_ENABLED=1`.
+
+Any detented **KY-040 style** encoder works (they cost about a pound). Only the
+two quadrature pins are needed; the module's push switch is left unconnected.
+
+| Encoder pin | Header pin | Signal | gpiod line |
+|---|---|---|---|
+| CLK (A) | 8 | PH2 | 226 |
+| DT (B) | 10 | PH3 | 227 |
+| GND | 6, 9, 14, 20 or 25 | GND | — |
+| + / VCC | 1 or 17 | **3.3 V** — not 5 V, these feed GPIO directly | — |
+| SW | — | not connected | — |
+
+Internal pull-ups are enabled in software, so the bare encoder needs no
+resistors. Most KY-040 breakout boards already carry 10 kΩ pull-ups to their
+`+` pin — harmless here, and another reason to feed them 3.3 V rather than 5 V.
+
+**Check the pins are actually free before wiring.** PH2/PH3 are UART5 by
+default, and if a device-tree overlay has enabled that UART the lines will be
+busy:
+
+```bash
+gpioinfo | grep -E 'line +(226|227):'     # want "unused", not a consumer name
+ls /dev/ttyS5                              # should NOT exist
+```
+
+If UART5 is enabled, either remove it from the `overlays=` line in
+`/boot/armbianEnv.txt`, or move the wheel to another free pair and set
+`MODEL_WHEEL_A_PIN` / `MODEL_WHEEL_B_PIN`. Free lines on this build: **PH2
+(226, pin 8), PH3 (227, pin 10), PH4 (228, pin 5), PH5 (229, pin 3)** — the last
+two are I2C3, so check those the same way.
+
+### The models it turns through
+
+`data/models.json`, seeded on first run from `IMAGE_GEN_MODEL` and
+`IMAGE_GEN_API` so a camera with no file behaves exactly as before. Add entries
+to give the wheel somewhere to turn:
+
+```json
+[
+  {"id": "gemini", "label": "Gemini",  "model": "google/gemini-2.5-flash-image", "api": "chat"},
+  {"id": "gpt",    "label": "GPT",     "model": "gpt-image-2",                   "api": "edits"},
+  {"id": "qwen",   "label": "Qwen",    "model": "Qwen/Qwen-Image-Edit-2509",     "api": "generations"}
+]
+```
+
+`api` is the same choice as `IMAGE_GEN_API` (`edits`, `chat` or `generations`),
+so the wheel can switch between providers that need different endpoints, not
+just between model names. `label` is what shows on the display — keep it short.
+An entry with no `model` is dropped, and if nothing valid survives the camera
+falls back to the `.env` model, so a typo here cannot leave it unable to shoot.
+
+Turning the wheel changes the model for the *next* photo; a generation already
+queued keeps the model it was queued with.
+
 ## Hot shoe flash trigger (optional)
 
 A standard hot-shoe socket fired through a **MOC3021** opto-triac on **PC11**
