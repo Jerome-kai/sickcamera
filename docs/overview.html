@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ImageGenCam Orange Pi Fork</title>
+<meta name="description" content="A point-and-shoot that redraws every photo with an image model — ported from the Raspberry Pi reference build to an Orange Pi Zero 2, an ST7796U panel and five keyboard switches.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* ---------- tokens: light ("contact sheet") ---------- */
+:root {
+  --paper:        #efebe4;
+  --panel:        #f9f7f3;
+  --panel-2:      #e7e2d8;
+  --ink:          #1a1613;
+  --ink-2:        #443c35;
+  --muted:        #74695f;
+  --faint:        #97897c;
+  --line:         #d6cfc3;
+  --line-soft:    #e2dcd2;
+  --safelight:    #b4451a;
+  --safelight-2:  #8e3512;
+  --glow:         rgba(180, 69, 26, 0.14);
+  --signal:       #1f6f74;
+  --violet:       #6b5aa6;
+  --leaf:         #45703f;
+  --shadow:       0 1px 0 rgba(26, 22, 19, .06), 0 10px 24px -18px rgba(26, 22, 19, .5);
+  --screen-bg:    #10161c;
+  --screen-ink:   #e8f0f4;
+
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --disp: "Archivo", "IBM Plex Sans", system-ui, sans-serif;
+
+  --measure: 66ch;
+  --gutter: clamp(18px, 4vw, 44px);
+  --max: 1140px;
+}
+/* ---------- tokens: dark ("darkroom") ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:       #14100e;
+    --panel:       #1c1714;
+    --panel-2:     #241d19;
+    --ink:         #efe7dd;
+    --ink-2:       #d3c7ba;
+    --muted:       #9b8d80;
+    --faint:       #7c6f64;
+    --line:        #332a24;
+    --line-soft:   #271f1b;
+    --safelight:   #ff8f4d;
+    --safelight-2: #ffb384;
+    --glow:        rgba(255, 143, 77, 0.16);
+    --signal:      #63b8bd;
+    --violet:      #a493dd;
+    --leaf:        #8bbd7f;
+    --shadow:      0 1px 0 rgba(0,0,0,.4), 0 14px 30px -20px rgba(0, 0, 0, .9);
+    --screen-bg:   #0b1015;
+    --screen-ink:  #e8f0f4;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:       #14100e;
+  --panel:       #1c1714;
+  --panel-2:     #241d19;
+  --ink:         #efe7dd;
+  --ink-2:       #d3c7ba;
+  --muted:       #9b8d80;
+  --faint:       #7c6f64;
+  --line:        #332a24;
+  --line-soft:   #271f1b;
+  --safelight:   #ff8f4d;
+  --safelight-2: #ffb384;
+  --glow:        rgba(255, 143, 77, 0.16);
+  --signal:      #63b8bd;
+  --violet:      #a493dd;
+  --leaf:        #8bbd7f;
+  --shadow:      0 1px 0 rgba(0,0,0,.4), 0 14px 30px -20px rgba(0, 0, 0, .9);
+  --screen-bg:   #0b1015;
+  --screen-ink:  #e8f0f4;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(120% 70% at 78% -10%, var(--glow), transparent 62%);
+}
+.wrap { position: relative; z-index: 1; max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
+
+a { color: inherit; text-decoration-color: var(--safelight); text-underline-offset: 3px; }
+a:hover { color: var(--safelight); }
+:focus-visible { outline: 2px solid var(--safelight); outline-offset: 3px; border-radius: 2px; }
+
+h1, h2, h3 {
+  font-family: var(--disp);
+  font-stretch: 118%;
+  font-weight: 700;
+  text-wrap: balance;
+  margin: 0;
+  line-height: 1.06;
+  letter-spacing: -0.012em;
+}
+h1 { font-size: clamp(37px, 5.8vw, 66px); font-weight: 800; }
+h2 { font-size: clamp(25px, 3.2vw, 36px); text-transform: uppercase; letter-spacing: 0.005em; }
+h3 { font-size: 17px; font-stretch: 108%; letter-spacing: 0.02em; text-transform: uppercase; }
+p { margin: 0; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.eyebrow b { color: var(--safelight); font-weight: 600; }
+.lede { font-size: clamp(17px, 1.9vw, 19.5px); color: var(--ink-2); max-width: var(--measure); }
+.note { font-size: 14px; color: var(--muted); max-width: var(--measure); }
+.mono { font-family: var(--mono); font-size: 0.9em; }
+
+/* ---------- masthead ---------- */
+.masthead {
+  display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: baseline; justify-content: space-between;
+  padding: 20px 0 0;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint);
+}
+.masthead .badge { color: var(--ink-2); }
+.masthead .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--safelight); margin-right: 7px; vertical-align: 1px; }
+
+/* ---------- hero ---------- */
+.hero { display: grid; gap: clamp(30px, 5vw, 56px); grid-template-columns: 1fr; padding: clamp(30px, 5vw, 54px) 0 clamp(28px, 4vw, 44px); }
+@media (min-width: 900px) { .hero { grid-template-columns: 1.02fr 0.98fr; align-items: center; } }
+.hero-copy { display: flex; flex-direction: column; gap: 20px; }
+.hero h1 span { color: var(--safelight); }
+.hero-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn {
+  font-family: var(--mono); font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase;
+  padding: 10px 16px; border: 1px solid var(--line); border-radius: 2px; background: var(--panel);
+  text-decoration: none; color: var(--ink-2); transition: border-color .15s, color .15s, background .15s;
+}
+.btn:hover { border-color: var(--safelight); color: var(--safelight); background: var(--panel); }
+.btn.primary { background: var(--safelight); border-color: var(--safelight); color: var(--paper); }
+.btn.primary:hover { background: var(--safelight-2); border-color: var(--safelight-2); color: var(--paper); }
+
+/* ---------- viewfinder ---------- */
+.rig { display: flex; flex-direction: column; gap: 14px; }
+.bezel {
+  background: linear-gradient(178deg, var(--panel-2), var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 14px 11px;
+  box-shadow: var(--shadow);
+}
+.screen {
+  position: relative; aspect-ratio: 480 / 320; border-radius: 3px; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 30% 20%, #2c4a52 0%, #16242c 55%, #0b1015 100%);
+  color: var(--screen-ink);
+  font-family: var(--mono);
+  border: 1px solid rgba(0,0,0,.5);
+}
+.scene { position: absolute; inset: 0; }
+.scene .sun { position: absolute; left: 16%; top: 16%; width: 84px; height: 84px; border-radius: 50%; background: radial-gradient(circle, #ffd6a0 0%, #f2a24a 55%, rgba(242,162,74,0) 72%); opacity: .85; }
+.scene .band { position: absolute; left: 0; right: 0; }
+.scene .b1 { bottom: 34%; height: 1px; background: rgba(232,240,244,.16); }
+.scene .b2 { bottom: 0; height: 34%; background: linear-gradient(180deg, #1d3a3f, #0e1a1f); }
+.scene .hill { position: absolute; bottom: 26%; left: -6%; width: 62%; height: 30%; background: #234148; border-radius: 50% 50% 0 0 / 100% 100% 0 0; }
+.scene .hill2 { position: absolute; bottom: 26%; right: -10%; width: 58%; height: 22%; background: #1b333a; border-radius: 50% 50% 0 0 / 100% 100% 0 0; }
+.scene .figure { position: absolute; bottom: 24%; left: 56%; width: 30px; height: 58px; background: #0d1a1e; border-radius: 14px 14px 3px 3px; }
+.scene .figure::before { content: ""; position: absolute; top: -19px; left: 4px; width: 22px; height: 22px; border-radius: 50%; background: #0d1a1e; }
+.grain { position: absolute; inset: 0; opacity: .3; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,.045) 0 1px, transparent 1px 3px); }
+
+.osd { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 9px 10px; font-size: 10.5px; letter-spacing: .06em; }
+.osd-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chip {
+  background: rgba(8, 14, 18, .68); border: 1px solid rgba(232,240,244,.22); border-radius: 2px;
+  padding: 3px 7px; text-transform: uppercase; backdrop-filter: blur(2px);
+}
+.chip.hot { border-color: rgba(255,143,77,.7); color: #ffc79b; }
+.chip.batt { letter-spacing: .1em; }
+.reticle { position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; }
+.reticle span { position: absolute; width: 13px; height: 13px; border: 1px solid rgba(232,240,244,.5); }
+.reticle span:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+.reticle span:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+.reticle span:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+.reticle span:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+.queue-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ff8f4d; margin-right: 6px; animation: breathe 2.6s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .queue-dot { animation: none; opacity: 1; } }
+.bezel-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 9px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset { font-family: var(--mono); font-size: 11.5px; padding: 4px 9px; border: 1px dashed var(--line); border-radius: 2px; color: var(--muted); }
+.preset:first-child { border-style: solid; border-color: var(--safelight); color: var(--safelight); }
+
+/* ---------- spec strip ---------- */
+.strip {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+  background: var(--line-soft); border-block: 1px solid var(--line);
+  margin: 8px 0 0;
+}
+@media (min-width: 720px) { .strip { grid-template-columns: repeat(4, 1fr); } }
+.strip div { background: var(--paper); padding: 16px 4px 15px; }
+.strip .n { font-family: var(--disp); font-stretch: 112%; font-weight: 700; font-size: 27px; line-height: 1; font-variant-numeric: tabular-nums; }
+.strip .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--faint); margin-top: 6px; }
+
+/* ---------- sections ---------- */
+section { padding: clamp(46px, 7vw, 84px) 0; border-top: 1px solid var(--line); }
+.sec-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: clamp(24px, 3.4vw, 38px); }
+.sec-head .lede { margin-top: 2px; }
+
+/* ---------- swap ledger ---------- */
+.ledger { display: flex; flex-direction: column; }
+.swap {
+  display: grid; grid-template-columns: 1fr; gap: 4px 18px;
+  padding: 16px 0; border-top: 1px solid var(--line-soft);
+}
+.swap:first-child { border-top: 0; }
+@media (min-width: 760px) { .swap { grid-template-columns: 1.15fr 1fr; align-items: start; } }
+.swap .to { font-family: var(--disp); font-stretch: 112%; font-weight: 600; font-size: 18px; }
+.swap .to em { font-style: normal; color: var(--safelight); font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; margin-left: 8px; }
+.swap .from { font-size: 14.5px; color: var(--muted); }
+.swap .from::before { content: "was "; font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.swap .why { grid-column: 1 / -1; font-size: 14.5px; color: var(--ink-2); max-width: var(--measure); }
+
+/* ---------- panel / controls ---------- */
+.controls { display: grid; gap: clamp(26px, 4vw, 46px); grid-template-columns: 1fr; align-items: center; }
+@media (min-width: 880px) { .controls { grid-template-columns: minmax(0, 420px) 1fr; } }
+.face {
+  position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  padding: 20px; box-shadow: var(--shadow);
+  display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center;
+}
+.shutter-row { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.key {
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 6px;
+  background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
+  box-shadow: inset 0 -2px 0 rgba(0,0,0,.07);
+}
+.key.mx { width: 52px; height: 52px; border-radius: 5px; border-color: var(--safelight); color: var(--safelight); box-shadow: inset 0 -3px 0 var(--glow); }
+.col { display: flex; flex-direction: column; gap: 16px; }
+.lcd {
+  aspect-ratio: 3 / 2; border-radius: 3px; background: var(--screen-bg); border: 1px solid var(--line);
+  display: grid; place-items: center; color: #7f9099; font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+}
+.keymap { display: flex; flex-direction: column; }
+.keymap li {
+  display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; padding: 13px 0; border-top: 1px solid var(--line-soft);
+  align-items: baseline;
+}
+.keymap { list-style: none; margin: 0; padding: 0; }
+.keymap li:first-child { border-top: 0; }
+.keymap .pin { font-family: var(--mono); font-size: 12px; color: var(--safelight); letter-spacing: .04em; white-space: nowrap; }
+.keymap .what { font-weight: 500; }
+.keymap .what small { display: block; font-weight: 400; color: var(--muted); font-size: 14px; }
+
+/* ---------- flow ---------- */
+.flow { display: grid; gap: 12px; grid-template-columns: 1fr; counter-reset: step; }
+@media (min-width: 860px) { .flow { grid-template-columns: repeat(5, 1fr); gap: 10px; } }
+.step {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 14px 14px 15px;
+  display: flex; flex-direction: column; gap: 7px; position: relative;
+}
+.step h4 { margin: 0; font-family: var(--disp); font-stretch: 110%; font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+.step p { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+.step .src { font-family: var(--mono); font-size: 11px; color: var(--signal); word-break: break-all; }
+.step::after {
+  content: "→"; position: absolute; right: -12px; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: 13px; display: none;
+}
+@media (min-width: 860px) { .step:not(:last-child)::after { display: block; } }
+.step.persist { border-color: var(--safelight); }
+.step.persist h4 { color: var(--safelight); }
+
+/* ---------- pin header ---------- */
+.headerwrap { overflow-x: auto; padding-bottom: 6px; }
+.pinout {
+  min-width: 560px; max-width: 700px; margin: 0 auto; display: grid;
+  grid-template-columns: 1fr 46px 46px 1fr; align-items: center;
+  font-family: var(--mono);
+}
+.pinout .conn { background: var(--panel-2); }
+.pl, .pr { display: flex; align-items: baseline; gap: 8px; padding: 3px 12px; font-size: 12.5px; color: var(--faint); }
+.pl { justify-content: flex-end; text-align: right; }
+.pr { justify-content: flex-start; }
+.pl .use, .pr .use { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.pl.on, .pr.on { color: var(--ink); }
+.pl.on .use, .pr.on .use { color: var(--safelight); }
+.pad {
+  height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--panel-2); border-inline: 1px solid var(--line-soft);
+}
+.pad.right { flex-direction: row-reverse; }
+.pad i {
+  width: 15px; height: 15px; border-radius: 2px; display: block;
+  background: var(--paper); border: 1px solid var(--line); font-style: normal;
+}
+.pad b {
+  font-size: 9.5px; font-weight: 500; color: var(--faint); line-height: 1;
+  font-variant-numeric: tabular-nums; min-width: 13px; text-align: center;
+}
+.pad.first i { border-radius: 2px; box-shadow: 0 0 0 2px var(--safelight); }
+i.pwr   { background: var(--safelight); border-color: var(--safelight); }
+i.gnd   { background: var(--faint); border-color: var(--faint); }
+i.spi   { background: var(--signal); border-color: var(--signal); }
+i.ctl   { background: var(--violet); border-color: var(--violet); }
+i.btn   { background: var(--leaf); border-color: var(--leaf); }
+i.opt   { background: transparent; border-color: var(--safelight); border-style: dashed; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 22px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 11px; height: 11px; border-radius: 2px; border: 1px solid; display: inline-block; }
+
+/* ---------- module table ---------- */
+.modules { width: 100%; border-collapse: collapse; font-size: 15px; }
+.modules caption { text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: .13em; text-transform: uppercase; color: var(--faint); padding-bottom: 10px; }
+.modules th { text-align: left; font-family: var(--mono); font-weight: 500; font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); padding: 0 12px 9px 0; border-bottom: 1px solid var(--line); }
+.modules td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.modules td:first-child { font-family: var(--mono); font-size: 13px; color: var(--ink); white-space: nowrap; }
+.modules td:last-child { color: var(--muted); font-size: 14.5px; }
+.modules .loc { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; color: var(--faint); padding-right: 22px; }
+.tablewrap { overflow-x: auto; }
+
+/* ---------- build log ---------- */
+.phases { display: grid; gap: clamp(24px, 3vw, 34px); grid-template-columns: 1fr; }
+@media (min-width: 780px) { .phases { grid-template-columns: 1fr 1fr; } }
+.phase h3 { color: var(--safelight); margin-bottom: 4px; }
+.phase .range { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+.log { list-style: none; margin: 12px 0 0; padding: 0; counter-reset: none; }
+.log li {
+  display: grid; grid-template-columns: 26px 1fr; gap: 12px; padding: 7px 0;
+  border-top: 1px solid var(--line-soft); font-size: 14.5px; color: var(--ink-2); line-height: 1.45;
+}
+.log li span { font-family: var(--mono); font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; padding-top: 3px; }
+
+/* ---------- roadmap ---------- */
+.road { display: grid; gap: 18px; grid-template-columns: 1fr; }
+@media (min-width: 800px) { .road { grid-template-columns: 1fr 1fr; } }
+.card { border: 1px solid var(--line); border-radius: 3px; padding: 20px; background: var(--panel); display: flex; flex-direction: column; gap: 9px; }
+.card .tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--safelight); }
+.card p { font-size: 14.5px; color: var(--muted); }
+.card .diag { font-size: 14.5px; color: var(--ink-2); }
+
+/* ---------- doc links ---------- */
+.docs { display: grid; gap: 1px; background: var(--line-soft); border: 1px solid var(--line); grid-template-columns: 1fr; }
+@media (min-width: 700px) { .docs { grid-template-columns: 1fr 1fr; } }
+.doc { background: var(--paper); padding: 18px 20px; text-decoration: none; display: flex; flex-direction: column; gap: 5px; transition: background .15s; }
+.doc:hover { background: var(--panel); color: inherit; }
+.doc b { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--safelight); letter-spacing: .02em; }
+.doc span { font-size: 14px; color: var(--muted); }
+
+footer { border-top: 1px solid var(--line); padding: 30px 0 46px; display: flex; flex-wrap: wrap; gap: 10px 26px; justify-content: space-between; font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <span class="badge"><span class="dot"></span>ImageGenCam · Orange Pi Zero 2 build</span>
+    <span>Allwinner H616 · ST7796U 480×320 · Apache-2.0</span>
+  </div>
+
+  <!-- ================= HERO ================= -->
+  <div class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Fork of <b>openai/imagegencam</b> — ported to the parts I already had</p>
+      <h1>A camera that <span>redraws</span> every photo it takes.</h1>
+      <p class="lede">
+        Press the shutter, the viewfinder freezes for a beat, and an image model repaints the frame in
+        whatever style is loaded. The upstream project wants a Raspberry Pi Zero 2 W and a Pimoroni HAT.
+        This one runs the same camera on an Orange Pi Zero 2, a 3.5&quot; SPI panel, a USB webcam board
+        and five keyboard switches — talking to any OpenAI-compatible gateway.
+      </p>
+      <div class="hero-links">
+        <a class="btn primary" href="https://github.com/Jerome-kai/sickcamera">Repository</a>
+        <a class="btn" href="https://github.com/Jerome-kai/sickcamera/blob/main/HARDWARE.md">Wiring &amp; bring-up</a>
+        <a class="btn" href="https://github.com/Jerome-kai/sickcamera/blob/main/software/ARCHITECTURE.md">Architecture</a>
+      </div>
+    </div>
+
+    <div class="rig">
+      <div class="bezel">
+        <div class="screen">
+          <div class="scene">
+            <div class="sun"></div>
+            <div class="hill"></div>
+            <div class="hill2"></div>
+            <div class="band b1"></div>
+            <div class="band b2"></div>
+            <div class="figure"></div>
+          </div>
+          <div class="grain"></div>
+          <div class="reticle"><span></span><span></span><span></span><span></span></div>
+          <div class="osd">
+            <div class="osd-row">
+              <span class="chip">Turn to Cheese</span>
+              <span class="chip batt">78%</span>
+            </div>
+            <div class="osd-row">
+              <span class="chip hot"><span class="queue-dot"></span>Queue 2</span>
+              <span class="chip">Gemini · edits</span>
+            </div>
+          </div>
+        </div>
+        <div class="bezel-foot">
+          <span>Live preview</span>
+          <span>ST7796U · SPI1 · 480×320</span>
+        </div>
+      </div>
+      <div class="presets">
+        <span class="preset">Turn to Cheese</span>
+        <span class="preset">Pathetic Scribble</span>
+        <span class="preset">Goblin Mode</span>
+        <span class="preset">Anime Portrait</span>
+        <span class="preset">Graduation Day</span>
+      </div>
+      <p class="note">Five prompts ship with the camera; the phone app edits them in place, and the
+        <b>Magic button</b> writes a new one from what the lens is looking at.</p>
+    </div>
+  </div>
+
+  <div class="strip">
+    <div><div class="n">34</div><div class="k">commits since the fork</div></div>
+    <div><div class="n">9,478</div><div class="k">lines across 11 modules</div></div>
+    <div><div class="n">170</div><div class="k">tests, no hardware needed</div></div>
+    <div><div class="n">26</div><div class="k">pin header, 16 wired</div></div>
+  </div>
+
+  <!-- ================= THE SWAP ================= -->
+  <section id="parts">
+    <div class="sec-head">
+      <p class="eyebrow">Bill of materials — every substitution</p>
+      <h2>The swap</h2>
+      <p class="lede">Nothing here is a like-for-like part. Each swap changed something in software:
+        a new panel driver, a GPIO shim, a V4L2 capture path, a gateway-agnostic API client.</p>
+    </div>
+
+    <div class="ledger">
+      <div class="swap">
+        <div class="to">Orange Pi Zero 2 <em>Allwinner H616</em></div>
+        <div class="from">Raspberry Pi Zero 2 W</div>
+        <p class="why">Different SoC, different GPIO numbering: lines are <span class="mono">port × 32 + pin</span>,
+          so PC9 is line 73. Two backends sit behind one interface — libgpiod, plus a sysfs path for the stock 4.9 kernel image.</p>
+      </div>
+      <div class="swap">
+        <div class="to">3.5&quot; ST7796U IPS <em>480×320</em></div>
+        <div class="from">Pimoroni Display HAT Mini (ST7789, 320×240)</div>
+        <p class="why">A new panel driver, <span class="mono">st7796.py</span>, pushes RGB565 over spidev with DC/RST/backlight on
+          three gpiod lines. Whole frames go out in a single <span class="mono">writebytes2</span> call. ILI9341 240×320 modules also work.</p>
+      </div>
+      <div class="swap">
+        <div class="to">USB UVC board camera <em>V4L2</em></div>
+        <div class="from">CSI spy camera for Pi Zero</div>
+        <p class="why">OpenCV replaces picamera2 — and the service now waits for the device to enumerate
+          instead of dying on a slow udev at boot.</p>
+      </div>
+      <div class="swap">
+        <div class="to">5 mechanical switches <em>1 MX + 4 tactile</em></div>
+        <div class="from">HAT buttons + PiSugar shutter</div>
+        <p class="why">The shutter is a full keyboard switch, unmistakable by feel. The four UI switches sit on a
+          perfboard strip behind the front panel, pulled up in software — no resistors.</p>
+      </div>
+      <div class="swap">
+        <div class="to">18650 pack, 2800 mAh <em>5 V / 3 A</em></div>
+        <div class="from">PiSugar 3</div>
+        <p class="why">A generic charge/protect/boost PCB with USB-C in and a JST lead out. No battery telemetry
+          over I²C, and no soft power switch yet — which is the first item on the V2 roadmap.</p>
+      </div>
+      <div class="swap">
+        <div class="to">Any OpenAI-compatible gateway <em>OPENAI_BASE_URL</em></div>
+        <div class="from">OpenAI API, direct</div>
+        <p class="why">Three request shapes are supported — <span class="mono">edits</span>, <span class="mono">chat</span> and
+          <span class="mono">generations</span> — so gateways without <span class="mono">/v1/images/edits</span> still work.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CONTROLS ================= -->
+  <section id="controls">
+    <div class="sec-head">
+      <p class="eyebrow">Front panel — 5 switches, no menus to hunt through</p>
+      <h2>How you drive it</h2>
+    </div>
+
+    <div class="controls">
+      <div class="face" aria-hidden="true">
+        <div class="shutter-row">
+          <span class="key mx">SHUT</span>
+        </div>
+        <div class="col">
+          <span class="key">Y</span>
+          <span class="key">X</span>
+        </div>
+        <div class="lcd">480 × 320</div>
+        <div class="col">
+          <span class="key">B</span>
+          <span class="key">A</span>
+        </div>
+      </div>
+
+      <ul class="keymap">
+        <li>
+          <span class="pin">pin 7 · PC9</span>
+          <span class="what">Shutter
+            <small>Short press takes the photo. Hold past 0.6 s and Magic mode writes a fresh prompt from the frame.</small></span>
+        </li>
+        <li>
+          <span class="pin">pin 18 · PC14</span>
+          <span class="what">Prompt menu <small>Top-left. Pick the style the next shot gets redrawn in.</small></span>
+        </li>
+        <li>
+          <span class="pin">pin 15 · PC8</span>
+          <span class="what">Album <small>Bottom-left. Sparkles when a generation lands.</small></span>
+        </li>
+        <li>
+          <span class="pin">pins 13 / 11</span>
+          <span class="what">Up · Down <small>Right-hand pair. Triple-tap up from live preview for Wi-Fi settings.</small></span>
+        </li>
+        <li>
+          <span class="pin">pins 8 / 10</span>
+          <span class="what">Model wheel <small>Optional KY-040 encoder. Turn it like a lens dial to change which model
+            the shutter uses; the list fades back to the viewfinder on its own.</small></span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= SIGNAL PATH ================= -->
+  <section id="path">
+    <div class="sec-head">
+      <p class="eyebrow">Capture to print — the rule is: file on disk before the network</p>
+      <h2>The signal path</h2>
+      <p class="lede">Generation happens in the background, so the camera keeps shooting while it works.
+        Jobs are small JSON files, not an in-memory queue — pull the battery mid-generation and the work
+        resumes on the next boot.</p>
+    </div>
+
+    <div class="flow">
+      <div class="step">
+        <h4>Capture</h4>
+        <p>V4L2 frame grabbed at full resolution while the preview freezes.</p>
+        <span class="src">controller.py</span>
+      </div>
+      <div class="step persist">
+        <h4>Saved first</h4>
+        <p>The original lands on the card before any network call is made.</p>
+        <span class="src">data/captures/</span>
+      </div>
+      <div class="step persist">
+        <h4>Queued</h4>
+        <p>One durable job file per photo, retried after failures and power cuts.</p>
+        <span class="src">data/queue/generation/</span>
+      </div>
+      <div class="step">
+        <h4>Redrawn</h4>
+        <p>Prompt plus image to the gateway, over whichever endpoint the model needs.</p>
+        <span class="src">openai_client.py</span>
+      </div>
+      <div class="step">
+        <h4>Shown</h4>
+        <p>Result on the panel, in the album, and downloadable from the phone.</p>
+        <span class="src">data/generated/</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= WIRING ================= -->
+  <section id="wiring">
+    <div class="sec-head">
+      <p class="eyebrow">26-pin header, 2.54 mm — gpiod lines are port × 32 + pin</p>
+      <h2>Sixteen wires</h2>
+      <p class="lede">Everything the camera needs comes off one header: the panel on SPI1, five switches
+        to a single daisy-chained ground, and two optional extras — a model wheel and a hot-shoe trigger.</p>
+    </div>
+
+    <div class="headerwrap">
+      <div class="pinout">
+        <!-- row 1 -->
+        <div class="pl">3.3 V</div>
+        <div class="pad left first"><b>1</b><i></i></div>
+        <div class="pad right"><b>2</b><i class="pwr"></i></div>
+        <div class="pr on">5 V<span class="use">panel VCC</span></div>
+        <!-- row 2 -->
+        <div class="pl">PH5 · I2C3_SDA</div>
+        <div class="pad left"><b>3</b><i></i></div>
+        <div class="pad right"><b>4</b><i></i></div>
+        <div class="pr">5 V</div>
+        <!-- row 3 -->
+        <div class="pl">PH4 · I2C3_SCK</div>
+        <div class="pad left"><b>5</b><i></i></div>
+        <div class="pad right"><b>6</b><i class="gnd"></i></div>
+        <div class="pr on">GND<span class="use">rail</span></div>
+        <!-- row 4 -->
+        <div class="pl on"><span class="use">shutter</span>PC9 · 73</div>
+        <div class="pad left"><b>7</b><i class="btn"></i></div>
+        <div class="pad right"><b>8</b><i class="opt"></i></div>
+        <div class="pr on">PH2 · 226<span class="use">wheel A</span></div>
+        <!-- row 5 -->
+        <div class="pl on">GND</div>
+        <div class="pad left"><b>9</b><i class="gnd"></i></div>
+        <div class="pad right"><b>10</b><i class="opt"></i></div>
+        <div class="pr on">PH3 · 227<span class="use">wheel B</span></div>
+        <!-- row 6 -->
+        <div class="pl on"><span class="use">down</span>PC6 · 70</div>
+        <div class="pad left"><b>11</b><i class="btn"></i></div>
+        <div class="pad right"><b>12</b><i class="opt"></i></div>
+        <div class="pr on">PC11 · 75<span class="use">hot shoe</span></div>
+        <!-- row 7 -->
+        <div class="pl on"><span class="use">up</span>PC5 · 69</div>
+        <div class="pad left"><b>13</b><i class="btn"></i></div>
+        <div class="pad right"><b>14</b><i class="gnd"></i></div>
+        <div class="pr on">GND</div>
+        <!-- row 8 -->
+        <div class="pl on"><span class="use">album</span>PC8 · 72</div>
+        <div class="pad left"><b>15</b><i class="btn"></i></div>
+        <div class="pad right"><b>16</b><i class="ctl"></i></div>
+        <div class="pr on">PC15 · 79<span class="use">backlight</span></div>
+        <!-- row 9 -->
+        <div class="pl">3.3 V</div>
+        <div class="pad left"><b>17</b><i></i></div>
+        <div class="pad right"><b>18</b><i class="btn"></i></div>
+        <div class="pr on">PC14 · 78<span class="use">prompt</span></div>
+        <!-- row 10 -->
+        <div class="pl on"><span class="use">MOSI</span>PH7 · 231</div>
+        <div class="pad left"><b>19</b><i class="spi"></i></div>
+        <div class="pad right"><b>20</b><i class="gnd"></i></div>
+        <div class="pr on">GND</div>
+        <!-- row 11 -->
+        <div class="pl">PH8 · MISO</div>
+        <div class="pad left"><b>21</b><i></i></div>
+        <div class="pad right"><b>22</b><i class="ctl"></i></div>
+        <div class="pr on">PC7 · 71<span class="use">panel reset</span></div>
+        <!-- row 12 -->
+        <div class="pl on"><span class="use">clock</span>PH6 · 230</div>
+        <div class="pad left"><b>23</b><i class="spi"></i></div>
+        <div class="pad right"><b>24</b><i class="spi"></i></div>
+        <div class="pr on">PH9 · CS0<span class="use">chip select</span></div>
+        <!-- row 13 -->
+        <div class="pl on">GND</div>
+        <div class="pad left"><b>25</b><i class="gnd"></i></div>
+        <div class="pad right"><b>26</b><i class="ctl"></i></div>
+        <div class="pr on">PC10 · 74<span class="use">data / command</span></div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><i style="background: var(--safelight); border-color: var(--safelight);"></i>power</span>
+      <span><i style="background: var(--faint); border-color: var(--faint);"></i>ground</span>
+      <span><i style="background: var(--signal); border-color: var(--signal);"></i>SPI1</span>
+      <span><i style="background: var(--violet); border-color: var(--violet);"></i>panel control</span>
+      <span><i style="background: var(--leaf); border-color: var(--leaf);"></i>buttons</span>
+      <span><i style="border-color: var(--safelight); border-style: dashed;"></i>optional add-ons</span>
+      <span><i style="border-color: var(--line);"></i>unused</span>
+    </div>
+    <p class="note" style="margin-top: 18px;">
+      Every pin above is overridable in <span class="mono">software/.env</span>. Full tables, panel spec, flash-trigger
+      schematic and OS setup live in
+      <a href="https://github.com/Jerome-kai/sickcamera/blob/main/HARDWARE.md">HARDWARE.md</a>.
+    </p>
+  </section>
+
+  <!-- ================= SOFTWARE ================= -->
+  <section id="software">
+    <div class="sec-head">
+      <p class="eyebrow">software/src/imagegencam — Python 3.10, 170 tests that run on any laptop</p>
+      <h2>What runs on the board</h2>
+      <p class="lede">One service. The controller owns the hardware loop and never blocks on the network;
+        the web server is a separate surface on the same process, local-LAN only by design.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table class="modules">
+        <caption>Module map · lines of Python</caption>
+        <thead>
+          <tr><th>Module</th><th class="loc" style="text-align: right;">Lines</th><th>Job</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>controller.py</td><td class="loc">4,370</td><td>The device loop: frames, drawing, button events, album state, Magic mode, job dispatch.</td></tr>
+          <tr><td>web.py</td><td class="loc">2,662</td><td>The phone app — gallery and downloads, prompt editor, live screen mirror, five virtual buttons, Wi-Fi tab.</td></tr>
+          <tr><td>config.py</td><td class="loc">546</td><td>Environment parsing and the on-disk stores for prompts, settings, models and Magic history.</td></tr>
+          <tr><td>openai_client.py</td><td class="loc">495</td><td>Every API call, across three endpoint shapes and any OpenAI-compatible base URL.</td></tr>
+          <tr><td>opi_hw.py</td><td class="loc">284</td><td>The shim: presents an Orange Pi display, buttons and USB camera behind the Pi HAT's own class surface.</td></tr>
+          <tr><td>sunxi_gpio.py</td><td class="loc">262</td><td>Two GPIO backends — libgpiod and sysfs — behind one interface, for old and new kernels.</td></tr>
+          <tr><td>wifi_manager.py</td><td class="loc">258</td><td>NetworkManager wrapper that never deletes a saved profile unless asked, and always keeps a rollback.</td></tr>
+          <tr><td>wifi_setup.py</td><td class="loc">219</td><td>The setup hotspot, so a new camera can be joined to a network with no terminal and no buttons.</td></tr>
+          <tr><td>st7796.py</td><td class="loc">214</td><td>The panel driver: RGB565 over spidev, whole frames in one transfer.</td></tr>
+          <tr><td>job_store.py</td><td class="loc">86</td><td>The durable queue — one JSON file per pending generation.</td></tr>
+          <tr><td>app.py</td><td class="loc">82</td><td>Wiring: config, clients, stores, controller and web server, started together.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= BUILD LOG ================= -->
+  <section id="log">
+    <div class="sec-head">
+      <p class="eyebrow">34 commits, oldest first — a port, then a product</p>
+      <h2>Build log</h2>
+      <p class="lede">The order matters: get it running on the wrong hardware, make it survive being
+        switched off at the wall, then make it usable by someone who didn&rsquo;t build it.</p>
+    </div>
+
+    <div class="phases">
+      <div class="phase">
+        <h3>Getting it to boot</h3>
+        <p class="range">01 – 08 · port and bring-up</p>
+        <ul class="log">
+          <li><span>01</span>Import upstream openai/imagegencam</li>
+          <li><span>02</span>Port to Orange Pi Zero 2: ST7796 display, USB camera, GPIO buttons, gateway support</li>
+          <li><span>03</span>Support legacy 4.9 kernel (stock Orange Pi Focal image)</li>
+          <li><span>04</span>Default SPI device to spidev1.1 for the legacy 4.9 image</li>
+          <li><span>05</span>Add gateway_test.py: pre-hardware end-to-end API check</li>
+          <li><span>06</span>Add chat-completions image-edit path for gateways without /v1/images/edits</li>
+          <li><span>07</span>Add enclosure &amp; wiring reference site (docs/index.html)</li>
+          <li><span>08</span>Add hot shoe flash trigger via MOC3021 on PC11</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Finding out what the parts really were</h3>
+        <p class="range">09 – 17 · hardware corrections</p>
+        <ul class="log">
+          <li><span>09</span>Support 2.8&quot; ILI9341 240×320 panels (DISPLAY_CONTROLLER=ili9341)</li>
+          <li><span>10</span>Display is a 3.5&quot; ST7796U MSP3526: correct docs, keep st7796 default</li>
+          <li><span>11</span>Document header powering, 13-pin USB camera port, and 5V battery pack</li>
+          <li><span>12</span>UI buttons switch to 6×6 tactile switches on a perfboard strip</li>
+          <li><span>13</span>Add Graduation Day prompt preset and a generation-queue badge</li>
+          <li><span>14</span>Overhaul web gallery for downloading; mirror UI tabs for right-side buttons</li>
+          <li><span>15</span>Batch delete, thumbnail cache cleanup, and hardware bring-up test scripts</li>
+          <li><span>16</span>Support Chinese OpenAI-compatible providers (SiliconFlow-style APIs)</li>
+          <li><span>17</span>Enclosure site: add FIG 4c camera USB wiring schematic (rev G)</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Surviving the real world</h3>
+        <p class="range">18 – 26 · reliability and Wi-Fi</p>
+        <ul class="log">
+          <li><span>18</span>Fix GPIO backend selection on the legacy 4.9 kernel</li>
+          <li><span>19</span>Blit full frames with one writebytes2 call</li>
+          <li><span>20</span>Add button_wiggle_test.py for hunting loose button wiring</li>
+          <li><span>21</span>Web remote: five virtual buttons drive the camera from a phone</li>
+          <li><span>22</span>Join Wi-Fi from a phone with no terminal and no buttons</li>
+          <li><span>23</span>Retry known networks instead of camping on the setup hotspot</li>
+          <li><span>24</span>Wait for the USB camera instead of dying before it enumerates</li>
+          <li><span>25</span>Stop /assets/ from reading the rest of the project</li>
+          <li><span>26</span>Survive a corrupt store, a stuck job, and a slow udev</li>
+        </ul>
+      </div>
+
+      <div class="phase">
+        <h3>Handing it to someone else</h3>
+        <p class="range">27 – 34 · product hardening</p>
+        <ul class="log">
+          <li><span>27</span>Add the V2 product roadmap</li>
+          <li><span>28</span>Per-device hotspot password, Wi-Fi forget, tutorial, screen sleep</li>
+          <li><span>29</span>Fix six audit findings: root escalation, brick paths, silent stalls</li>
+          <li><span>30</span>Reject a negative Content-Length before reading the body</li>
+          <li><span>31</span>Raise the preview frame rate and make the redraw budgets tunable</li>
+          <li><span>32</span>Cut SPI transfer overhead and add a display benchmark</li>
+          <li><span>33</span>Add an optional model wheel: a rotary encoder that picks the AI model</li>
+          <li><span>34</span>&hellip; and whatever the roadmap below turns into next</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ROADMAP ================= -->
+  <section id="next">
+    <div class="sec-head">
+      <p class="eyebrow">V2 — measure before rewriting, fix causes not symptoms</p>
+      <h2>Known defects</h2>
+      <p class="lede">V1 works. It also boots for five minutes, hangs together on dupont wires, and greets a
+        new owner with a published hotspot password. V2 treats those as defects rather than quirks.</p>
+    </div>
+
+    <div class="road">
+      <div class="card">
+        <span class="tag">01 · Power</span>
+        <p class="diag">The switch is the bug. It sits in the power line, so every &ldquo;off&rdquo; is a hard cut and every
+          &ldquo;on&rdquo; is a cold boot of Ubuntu, the service, Wi-Fi association and camera enumeration.</p>
+        <p>Fix: a MOSFET soft-latch with sense and hold lines, and a real sleep state — backlight off, camera
+          released, wake on the shutter. A rewrite in a faster language is explicitly rejected: the app already
+          starts in seconds.</p>
+      </div>
+      <div class="card">
+        <span class="tag">02 · Carrier PCB</span>
+        <p class="diag">Dupont wires and a perfboard strip do not survive being carried around.</p>
+        <p>Fix: one small board that carries the header, the switches, the latch circuit and the panel connector —
+          scoped to a first PCB that can actually succeed.</p>
+      </div>
+      <div class="card">
+        <span class="tag">03 · UX</span>
+        <p class="diag">The camera is usable by the person who built it, which is not the same as usable.</p>
+        <p>Fix: first-run tutorial, screen sleep and clearer state on the panel — some of this has already landed.</p>
+      </div>
+      <div class="card">
+        <span class="tag">04 · Security</span>
+        <p class="diag">Stop publishing the keys. A shared hotspot password and a wide-open local web app are fine
+          on a bench and wrong on a device you hand to someone.</p>
+        <p>Fix: per-device credentials (done), a narrow sudoers rule for the few <span class="mono">nmcli</span>
+          commands (done), and authentication on the phone app before it goes anywhere but the LAN.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= DOCS ================= -->
+  <section id="docs">
+    <div class="sec-head">
+      <p class="eyebrow">Where everything is written down</p>
+      <h2>Read next</h2>
+    </div>
+
+    <div class="docs">
+      <a class="doc" href="https://github.com/Jerome-kai/sickcamera/blob/main/README.md">
+        <b>README.md</b><span>What the camera is, what you need, and how to use it.</span>
+      </a>
+      <a class="doc" href="https://github.com/Jerome-kai/sickcamera/blob/main/HARDWARE.md">
+        <b>HARDWARE.md</b><span>Pinouts, panel spec, OS setup, bring-up order, every tunable in .env.</span>
+      </a>
+      <a class="doc" href="./index.html">
+        <b>docs/index.html</b><span>The enclosure &amp; wiring reference site — drawn schematics, rev G.</span>
+      </a>
+      <a class="doc" href="https://github.com/Jerome-kai/sickcamera/blob/main/software/ARCHITECTURE.md">
+        <b>software/ARCHITECTURE.md</b><span>Runtime shape, data folders, and the reliability rules.</span>
+      </a>
+      <a class="doc" href="https://github.com/Jerome-kai/sickcamera/blob/main/docs/ROADMAP-V2.md">
+        <b>docs/ROADMAP-V2.md</b><span>The full V2 plan, with the measurements each change has to justify.</span>
+      </a>
+      <a class="doc" href="https://github.com/Jerome-kai/sickcamera/tree/main/3d%20model">
+        <b>3d model/</b><span>Folding case, buttons and clip-on lens as .step and .stl.</span>
+      </a>
+    </div>
+  </section>
+
+  <footer>
+    <span>Fork of openai/imagegencam · Apache-2.0</span>
+    <span>Orange Pi Zero 2 · rev G</span>
+  </footer>
+
+</div>
+
+</body>
+</html>
