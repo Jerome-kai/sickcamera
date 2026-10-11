@@ -183,7 +183,11 @@ private fun CameraContent(
 
     val previewView = remember {
         PreviewView(context).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            // Letterboxed, not cropped: the preview and the photo are both the
+            // sensor's full 4:3 frame, and the model gets the whole photo. Filling
+            // the screen would hide the edges of what is sent (the camera's
+            // viewfinder showed exactly the 4:3 crop the model received).
+            scaleType = PreviewView.ScaleType.FIT_CENTER
             // TextureView-backed, so the frozen capture frame can be grabbed.
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
@@ -194,29 +198,50 @@ private fun CameraContent(
     LaunchedEffect(flashMode) { imageCapture.flashMode = flashMode }
 
     LaunchedEffect(lensBack) {
-        val provider = cameraProvider(context)
-        val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
-        val selector = if (lensBack) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
+        // The provider future can fail too (camera service down), and an
+        // exception escaping a LaunchedEffect would crash the app, so the
+        // whole bind is guarded, not just bindToLifecycle.
         try {
+            val provider = cameraProvider(context)
+            val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+            val selector = if (lensBack) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
             provider.unbindAll()
             provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             session.say("Camera unavailable: ${error.message}", isError = true)
+            // A phone with no front camera lands here on flip; go back to the
+            // one that works rather than leaving the viewfinder dark.
+            if (!lensBack) lensBack = true
         }
     }
 
     // ---- capture feedback: frozen frame + fading white flash -----------------
     var frozen by remember { mutableStateOf<ImageBitmap?>(null) }
     val feedback = remember { Animatable(1f) }
-    var lastShutterAt by remember { mutableStateOf(0L) }
+    // The camera debounced per event name, so a tap and a hold never block each other.
+    var lastShotAt by remember { mutableStateOf(0L) }
+    var lastMagicAt by remember { mutableStateOf(0L) }
 
     fun capture(magic: Boolean) {
         val now = SystemClock.uptimeMillis()
-        if (now - lastShutterAt < SHUTTER_DEBOUNCE_MS) return
-        lastShutterAt = now
-        if (!magic) session.refusal()?.let { session.say(it, isError = true); return }
-        if (magic && !hasKey) { session.say("Add your API key in Settings first.", isError = true); return }
-        if (magic && !settings.magicEnabled) return
+        if (now - (if (magic) lastMagicAt else lastShotAt) < SHUTTER_DEBOUNCE_MS) return
+        if (magic) lastMagicAt = now else lastShotAt = now
+
+        // Refuse before taking the photo, as the camera did, so a refused press
+        // gives no flash. CameraSession.shoot and seedMagic check the same
+        // things again once the file exists; that is the backstop, not the gate.
+        val current = session.state.value
+        if (magic) {
+            if (!settings.magicEnabled) return
+            if (current.magicPending) { session.say("Magic prompt is still being written"); return }
+            if (!hasKey) { session.say("Add your API key in Settings first.", isError = true); return }
+        } else {
+            if (current.magicActive && current.magicPending) { session.say("Magic prompt is still being written"); return }
+            if (current.magicActive && current.magic == null) { session.say("Hold the shutter to create a magic prompt first"); return }
+            session.refusal()?.let { session.say(it, isError = true); return }
+        }
 
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         val snapshot: Bitmap? = previewView.bitmap
