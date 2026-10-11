@@ -56,7 +56,6 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -91,6 +90,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.jeromekai.latent.container
 import io.github.jeromekai.latent.core.model.ModelPreset
 import io.github.jeromekai.latent.ui.Amber
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine

@@ -1,5 +1,6 @@
 package io.github.jeromekai.latent.camera
 
+import android.util.Log
 import io.github.jeromekai.latent.AppContainer
 import io.github.jeromekai.latent.core.api.ImageInput
 import io.github.jeromekai.latent.core.api.OpenAiImageEditor
@@ -15,11 +16,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
+private const val TAG = "CameraSession"
 
 /** A message for the status line; [id] makes a repeat of the same text show again. */
 data class Status(val text: String, val isError: Boolean = false, val id: Long = System.nanoTime())
@@ -48,6 +54,20 @@ class CameraSession(private val container: AppContainer) {
     private val _state = MutableStateFlow(SessionState(magic = restoreMagic()))
     val state: StateFlow<SessionState> = _state.asStateFlow()
 
+    init {
+        // With Magic Mode switched off the camera could not be in magic mode
+        // and shot with normal prompts. The phone can flip the switch while a
+        // recipe is active, so leave magic mode when that happens.
+        scope.launch {
+            container.settings.settings
+                .map { it.magicEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (!enabled) _state.update { it.copy(magicActive = false, magicFailed = false) }
+                }
+        }
+    }
+
     /**
      * magic-history-restore-at-boot: the newest recipe comes back if its
      * reference photo still exists, so magic mode can shoot straight away.
@@ -59,7 +79,13 @@ class CameraSession(private val container: AppContainer) {
         return newest.takeIf { reference?.isFile == true }
     }
 
-    fun say(text: String, isError: Boolean = false) = _state.update { it.copy(status = Status(text, isError)) }
+    /**
+     * Any new message replaces the last one, as on the camera -- which is also
+     * what ends the "Magic mode failed" pill, since that was just the status
+     * text being exactly that string.
+     */
+    fun say(text: String, isError: Boolean = false) =
+        _state.update { it.copy(status = Status(text, isError), magicFailed = false) }
 
     /** _magic_prompt_display_text: what the title pill shows in magic mode. */
     fun magicPillText(s: SessionState = state.value): String = when {
@@ -67,6 +93,15 @@ class CameraSession(private val container: AppContainer) {
         s.magicPending -> "Making magic recipe"
         s.magic == null -> "Snap a photo of something unique"
         else -> s.magic.title
+    }
+
+    /** created_at as the camera wrote it: local ISO time to the second, seconds always present. */
+    private fun isoSeconds(now: LocalDateTime): String =
+        now.withNano(0).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+
+    /** A photo is a temporary file in the cache; deleting it is disk work too. */
+    private fun discard(photo: File) {
+        scope.launch(Dispatchers.IO) { photo.delete() }
     }
 
     // ---- refusals --------------------------------------------------------------
@@ -84,42 +119,51 @@ class CameraSession(private val container: AppContainer) {
     /** The shutter: a normal shot, or a magic one while magic mode is on. */
     fun shoot(photo: File) {
         val s = state.value
-        if (s.magicActive) {
-            when {
-                s.magicPending -> { photo.delete(); say("Magic prompt is still being written"); return }
-                s.magic == null -> { photo.delete(); say("Hold the shutter to create a magic prompt first"); return }
-            }
+        // The camera's order: a recipe still being written, then no recipe yet.
+        if (s.magicActive && s.magicPending) {
+            discard(photo)
+            say("Magic prompt is still being written")
+            return
+        }
+        if (s.magicActive && s.magic == null) {
+            discard(photo)
+            say("Hold the shutter to create a magic prompt first")
+            return
         }
         val prompt = container.selectedPrompt()
-        val magic = s.magic.takeIf { s.magicActive }
+        val magic = if (s.magicActive) s.magic else null
         val title = magic?.title ?: prompt.title
-        say(if (magic != null) "Using magic prompt: $title" else "Shooting with $title")
+        say(if (magic != null) "Using magic prompt: $title" else "$title queued")
 
         scope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val references = if (magic != null) {
-                        listOfNotNull(magic.referenceCapturePath)
-                    } else {
-                        listOfNotNull(container.referenceFile(prompt)?.let { container.gallery.relative(it) })
+                    try {
+                        val references = if (magic != null) {
+                            listOfNotNull(magic.referenceCapturePath)
+                        } else {
+                            listOfNotNull(container.referenceFile(prompt)?.let { container.gallery.relative(it) })
+                        }
+                        enqueue(
+                            photo = photo,
+                            promptId = if (magic != null) "magic" else prompt.id,
+                            promptTitle = title,
+                            promptBody = magic?.body ?: prompt.body,
+                            references = references,
+                            magicHistoryId = magic?.id,
+                        )
+                    } finally {
+                        photo.delete()
                     }
-                    enqueue(
-                        photo = photo,
-                        promptId = if (magic != null) "magic" else prompt.id,
-                        promptTitle = title,
-                        promptBody = magic?.body ?: prompt.body,
-                        references = references,
-                        magicHistoryId = magic?.id,
-                    )
                 }
             } catch (error: Exception) {
-                say("Could not save the photo: ${error.message}", isError = true)
-            } finally {
-                photo.delete()
+                Log.w(TAG, "Capture failed", error)
+                say("Capture failed. Preview ready.", isError = true)
             }
         }
     }
 
+    /** Runs on the IO dispatcher: it decodes, scales and writes the photo, then saves the job. */
     private fun enqueue(
         photo: File,
         promptId: String,
@@ -137,6 +181,8 @@ class CameraSession(private val container: AppContainer) {
         val input = Geometry.generationInputSize(oriented, settings.inputWidth, settings.inputHeight)
         val decoded = Images.decodeOriented(photo, input) ?: error("the camera returned an unreadable photo")
         val fitted = Images.fitForGeneration(decoded, settings.inputWidth, settings.inputHeight)
+        // Taken before the recycle below: a recycled bitmap is not for reading.
+        val fittedSize = PixelSize(fitted.width, fitted.height)
         val capture = container.gallery.capturePath(id, promptId, now)
         capture.parentFile?.mkdirs()
         capture.writeBytes(Images.jpeg(fitted, 90))
@@ -157,7 +203,7 @@ class CameraSession(private val container: AppContainer) {
             model = model.model,
             api = model.api,
             // A portrait shot asks for a portrait image back.
-            size = Geometry.outputSize(settings.size, PixelSize(fitted.width, fitted.height)),
+            size = Geometry.outputSize(settings.size, fittedSize),
             quality = settings.quality,
             outputFormat = settings.outputFormat.wire,
             outputCompression = settings.outputCompression,
@@ -176,8 +222,8 @@ class CameraSession(private val container: AppContainer) {
      */
     fun seedMagic(photo: File) {
         val settings = container.settings.value
-        if (!settings.magicEnabled) { photo.delete(); return }
-        if (state.value.magicPending) { photo.delete(); say("Magic prompt is still being written"); return }
+        if (!settings.magicEnabled) { discard(photo); return }
+        if (state.value.magicPending) { discard(photo); say("Magic prompt is still being written"); return }
 
         _state.update {
             it.copy(
@@ -190,37 +236,42 @@ class CameraSession(private val container: AppContainer) {
         scope.launch {
             try {
                 val now = LocalDateTime.now()
-                val reference = withContext(Dispatchers.IO) {
-                    val id = Gallery.mediaId(now)
-                    val oriented = Images.orientedSize(photo) ?: error("unreadable photo")
-                    val input = Geometry.generationInputSize(oriented, settings.inputWidth, settings.inputHeight)
-                    val decoded = Images.decodeOriented(photo, input) ?: error("unreadable photo")
-                    val fitted = Images.fitForGeneration(decoded, settings.inputWidth, settings.inputHeight)
-                    val file = container.gallery.magicReferencePath(id, now)
-                    file.parentFile?.mkdirs()
-                    file.writeBytes(Images.jpeg(fitted, 90))
-                    if (fitted !== decoded) decoded.recycle()
-                    fitted.recycle()
-                    file
-                }
-                val planned = container.planner.plan(
-                    endpoint = container.endpoint(),
-                    image = ImageInput(reference.readBytes(), reference.name, "image/jpeg"),
-                    model = settings.magicModel,
-                    api = settings.magicApi,
-                    timeoutSeconds = settings.magicTimeoutSeconds,
-                )
+                // All on the IO dispatcher: the decode, the Keystore read behind
+                // endpoint() and the base64 of the upload are not main-thread work.
+                // The reference photo is kept even if planning fails, as on the camera.
                 val entry = withContext(Dispatchers.IO) {
-                    container.magicHistory.add(
-                        MagicHistoryEntry(
-                            id = "magic-${reference.nameWithoutExtension}",
-                            createdAt = now.withNano(0).toString(),
-                            title = planned.title,
-                            body = planned.prompt,
-                            referenceCapturePath = container.gallery.relative(reference),
-                            promotedPromptId = null,
-                        ),
-                    )
+                    try {
+                        val id = Gallery.mediaId(now)
+                        val oriented = Images.orientedSize(photo) ?: error("unreadable photo")
+                        val input = Geometry.generationInputSize(oriented, settings.inputWidth, settings.inputHeight)
+                        val decoded = Images.decodeOriented(photo, input) ?: error("unreadable photo")
+                        val fitted = Images.fitForGeneration(decoded, settings.inputWidth, settings.inputHeight)
+                        val reference = container.gallery.magicReferencePath(id, now)
+                        reference.parentFile?.mkdirs()
+                        reference.writeBytes(Images.jpeg(fitted, 90))
+                        if (fitted !== decoded) decoded.recycle()
+                        fitted.recycle()
+
+                        val planned = container.planner.plan(
+                            endpoint = container.endpoint(),
+                            image = ImageInput(reference.readBytes(), reference.name, "image/jpeg"),
+                            model = settings.magicModel,
+                            api = settings.magicApi,
+                            timeoutSeconds = settings.magicTimeoutSeconds,
+                        )
+                        container.magicHistory.add(
+                            MagicHistoryEntry(
+                                id = "magic-${reference.nameWithoutExtension}",
+                                createdAt = isoSeconds(now),
+                                title = planned.title,
+                                body = planned.prompt,
+                                referenceCapturePath = container.gallery.relative(reference),
+                                promotedPromptId = null,
+                            ),
+                        )
+                    } finally {
+                        photo.delete()
+                    }
                 }
                 _state.update {
                     it.copy(magic = entry, magicPending = false, magicFailed = false, status = Status("Magic prompt ready: ${entry.title}"))
@@ -234,8 +285,6 @@ class CameraSession(private val container: AppContainer) {
                         status = Status("Magic mode failed: ${error.message ?: "unknown error"}", isError = true),
                     )
                 }
-            } finally {
-                photo.delete()
             }
         }
     }
@@ -249,14 +298,44 @@ class CameraSession(private val container: AppContainer) {
 
     /** Use a recipe from the history as the current magic prompt. */
     fun useMagic(entry: MagicHistoryEntry) {
+        // Magic Mode off means magic mode cannot start. Say why, because the
+        // recipe list that called this is about to hand control back to the camera.
+        if (!container.settings.value.magicEnabled) {
+            say("Magic mode is turned off in Settings", isError = true)
+            return
+        }
         _state.update { it.copy(magic = entry, magicActive = true, magicFailed = false, status = Status("Magic ready: ${entry.title}")) }
     }
 
     // ---- recreate as a 9:16 story -----------------------------------------------
 
-    /** recreate_vertical_from_generated, queued instead of blocking the screen. */
+    /**
+     * recreate_vertical_from_generated, queued instead of blocking the screen.
+     * True means the request was accepted; the job file is written in the
+     * background, so a failure after that arrives as a status message.
+     */
     fun recreateStory(generated: File): Boolean {
         refusal()?.let { say(it, isError = true); return false }
+        say("Recreating as a 9:16 story")
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { enqueueStory(generated) }
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not queue the 9:16 story", error)
+                say(error.message ?: "Could not recreate this image", isError = true)
+            }
+        }
+        return true
+    }
+
+    /** Runs on the IO dispatcher: path checks, job file and queue count all touch the disk. */
+    private fun enqueueStory(generated: File) {
+        // The camera's two refusals, with its messages.
+        require(generated.canonicalFile.startsWith(container.gallery.generatedDir.canonicalFile)) {
+            "Invalid generated image path."
+        }
+        check(generated.isFile) { "Generated image not found." }
+
         val settings = container.settings.value
         val model = container.selectedModel()
         val now = LocalDateTime.now()
@@ -283,7 +362,5 @@ class CameraSession(private val container: AppContainer) {
         container.jobs.save(job)
         container.refreshQueue()
         container.scheduler.schedule(job.id)
-        say("Recreating as a 9:16 story")
-        return true
     }
 }

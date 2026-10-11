@@ -1,6 +1,7 @@
 package io.github.jeromekai.latent
 
 import android.content.Context
+import io.github.jeromekai.latent.camera.CameraSession
 import io.github.jeromekai.latent.core.api.ApiEndpoint
 import io.github.jeromekai.latent.core.api.OpenAiImageEditor
 import io.github.jeromekai.latent.core.api.OpenAiMagicPlanner
@@ -49,8 +50,9 @@ class AppContainer(context: Context) {
     val scheduler = GenerationScheduler(appContext, this)
 
     /** Capture and magic-mode state, shared by every screen. */
-    val session by lazy { io.github.jeromekai.latent.camera.CameraSession(this) }
+    val session by lazy { CameraSession(this) }
 
+    /** Reads the key out of the Keystore, so call it off the main thread. */
     fun endpoint(): ApiEndpoint = ApiEndpoint(settings.value.baseUrl, secureKey.get().orEmpty())
 
     // ---- live state the UI watches -------------------------------------------
@@ -72,6 +74,12 @@ class AppContainer(context: Context) {
             if (value) _unseen.value = 0
         }
 
+    /**
+     * Synchronized so the list-then-publish pair cannot interleave: shots,
+     * the worker and the queue sheet all call this from different threads,
+     * and a slower reader publishing last would leave the badge stale.
+     */
+    @Synchronized
     fun refreshQueue() {
         val all = jobs.all()
         _queue.value = QueueState(pending = all.count { !it.failed }, failed = all.count { it.failed })
