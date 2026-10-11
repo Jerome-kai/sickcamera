@@ -23,3 +23,16 @@ software/data/ap_password
 # Seeded per-device from .env on first run; committing one would silently
 # override the model each camera is actually configured for.
 software/data/models.json
+
+# Android app
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/core/.gradle/
+android/core/.kotlin/
+android/core/build/
+android/local.properties
+android/*.apk
+*.keystore
+*.jks
