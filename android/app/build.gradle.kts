@@ -11,10 +11,15 @@ plugins {
 // installs over the previous one. Local builds are version 1.
 val buildNumber = (System.getenv("LATENT_BUILD_NUMBER") ?: "1").toInt()
 
-// Release signing comes from the environment (GitHub secrets in CI). Without
-// it the release build falls back to the debug key, which still installs --
-// but a different machine's debug key cannot update an existing install.
+// Release signing. Android only installs an update over an app signed with the
+// SAME key, so a key that changes between builds means uninstalling -- and losing
+// the app's data -- on every update. Hence two options, never a random one:
+//   1. a private key from the environment (GitHub secrets in CI), or
+//   2. signing/public-fallback.keystore, committed on purpose and NOT a secret.
+// Option 2 keeps updates working out of the box but is not a trust anchor: anyone
+// can sign with it. android/README.md explains moving to a private key.
 val keystorePath: String? = System.getenv("LATENT_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+val fallbackKeystore = rootProject.file("signing/public-fallback.keystore")
 
 android {
     namespace = "io.github.jeromekai.latent"
@@ -29,12 +34,17 @@ android {
     }
 
     signingConfigs {
-        if (keystorePath != null) {
-            create("release") {
+        create("release") {
+            if (keystorePath != null) {
                 storeFile = file(keystorePath)
                 storePassword = System.getenv("LATENT_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("LATENT_KEY_ALIAS")
                 keyPassword = System.getenv("LATENT_KEY_PASSWORD")
+            } else {
+                storeFile = fallbackKeystore
+                storePassword = "latent-public"
+                keyAlias = "latent-public"
+                keyPassword = "latent-public"
             }
         }
     }
@@ -42,11 +52,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = if (keystorePath != null) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

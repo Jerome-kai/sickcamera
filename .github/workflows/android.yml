@@ -36,9 +36,9 @@ jobs:
         working-directory: android/core
         run: ../gradlew test --console=plain
 
-      # Optional stable signing key. Without these secrets the APK is signed
-      # with this runner's throwaway debug key: it installs, but it cannot
-      # update an install made from a different build. See android/README.md.
+      # Optional private signing key. Without these secrets the APK is signed with
+      # the PUBLIC fallback key in android/signing/: updates still install in
+      # place, but the key is not a secret. See android/README.md.
       - name: Restore signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.LATENT_KEYSTORE_BASE64 }}
@@ -48,7 +48,7 @@ jobs:
             echo "LATENT_KEYSTORE_PATH=$RUNNER_TEMP/latent.keystore" >> "$GITHUB_ENV"
             echo "Signing with the stored release key."
           else
-            echo "::warning::No LATENT_KEYSTORE_BASE64 secret; signing with a throwaway debug key."
+            echo "::warning::No LATENT_KEYSTORE_BASE64 secret; signing with the public fallback key (updates work, but anyone could sign as you)."
           fi
 
       - name: Build release APK
@@ -75,14 +75,23 @@ jobs:
           if-no-files-found: error
 
       # A release gives the phone a plain download link -- no GitHub login and
-      # no zip to unpack, which an Actions artifact would need.
+      # no zip to unpack, which an Actions artifact would need. Builds from the
+      # dev branch are published as prereleases so they never pose as stable.
       - name: Publish release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/zen-volta-lvFjq'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latent-v1.0.${{ github.run_number }}
           name: Latent 1.0.${{ github.run_number }}
+          # Pin the tag to the commit that was built, not the default branch head.
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
           body: |
-            Android build of the camera. On the phone: open this page, tap the APK
-            below, and allow installs from your browser when Android asks.
+            Android build of the camera.
+
+            **Install:** open this page on your phone, tap the APK below, and allow
+            installs from your browser when Android asks. Builds install over each
+            other, so your prompts, photos and API key survive updates.
+
+            Commit ${{ github.sha }}
           files: ${{ steps.apk.outputs.path }}

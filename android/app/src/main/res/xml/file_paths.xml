@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only finished images can be shared. Prompts, settings and the job queue
+     live beside them and must never be reachable through the share sheet. -->
+<paths>
+    <files-path name="generated" path="latent/generated/" />
+</paths>

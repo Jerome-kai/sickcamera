@@ -35,4 +35,6 @@ android/core/build/
 android/local.properties
 android/*.apk
 *.keystore
+# Deliberately public: the fallback signing key, so unconfigured builds still update in place.
+!android/signing/public-fallback.keystore
 *.jks
