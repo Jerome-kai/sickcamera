@@ -59,6 +59,18 @@ class StoreTest {
     }
 
     @Test
+    fun aDeletedPromptsIdIsNeverIssuedAgain() {
+        // The id names the reference image and is held by queued jobs and the
+        // selected-prompt setting; reusing one hands all of that to a stranger.
+        val store = PromptStore(File(tmp.root, "prompts.json"))
+        val first = store.add("A", "a")
+        store.remove(first.id)
+        val ids = (1..50).map { store.add("N$it", "n").id }
+        assertFalse(first.id in ids)
+        assertEquals(ids.size, ids.toSet().size, "ids issued in the same millisecond must still differ")
+    }
+
+    @Test
     fun everyWriteIsNormalised() {
         val store = PromptStore(File(tmp.root, "prompts.json"))
         store.edit(store.value.first().id) { it.copy(title = "   ", body = "") }

@@ -89,10 +89,17 @@ class PromptStore(file: File) {
         return store.value.firstOrNull { it.id == id }
     }
 
+    /**
+     * A prompt id is also the name of its reference image and is remembered by
+     * queued jobs, finished-image metadata and the selected-prompt setting. A
+     * counter such as "prompt-<size+1>" re-issues the id of a prompt that was
+     * deleted, so the new prompt silently inherited all of that. The clock
+     * does not repeat, as the camera's web editor ("prompt-<Date.now()>") knew.
+     */
     private fun freshId(taken: Set<String>): String {
-        var index = taken.size + 1
-        while ("prompt-$index" in taken) index += 1
-        return "prompt-$index"
+        var stamp = System.currentTimeMillis()
+        while ("prompt-$stamp" in taken) stamp += 1
+        return "prompt-$stamp"
     }
 }
 

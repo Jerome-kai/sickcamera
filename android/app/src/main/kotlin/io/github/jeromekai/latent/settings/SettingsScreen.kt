@@ -63,6 +63,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -75,6 +76,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.jeromekai.latent.AppContainer
 import io.github.jeromekai.latent.container
 import io.github.jeromekai.latent.core.model.AppTheme
+import io.github.jeromekai.latent.core.model.Defaults
 import io.github.jeromekai.latent.core.model.Normalize
 import io.github.jeromekai.latent.core.model.Settings
 import io.github.jeromekai.latent.data.PhoneGallery
@@ -168,8 +170,11 @@ private fun ApiKeyCard() {
     val context = LocalContext.current
     val container = context.container
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     val hasKey by container.secureKey.hasKey.collectAsStateWithLifecycle()
     val settings by container.settings.settings.collectAsStateWithLifecycle()
+    // Only OpenAI refuses /models for a bad key; see CheckStatus.
+    val officialServer = settings.baseUrl.isEmpty() || settings.baseUrl.equals(Defaults.OPENAI_BASE_URL, ignoreCase = true)
 
     // The draft deliberately lives in plain remember, not rememberSaveable:
     // saved state is written out of process, and a key must go nowhere.
@@ -189,6 +194,15 @@ private fun ApiKeyCard() {
     fun saveKey() {
         val key = draft.trim()
         if (key.isEmpty() || saving) return
+        if (!isSendableKey(key)) {
+            // A stored key like this could never be sent, and would fail every photo.
+            Toast.makeText(
+                context,
+                "A key has no spaces, line breaks or special characters. Check what was pasted.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
         saving = true
         scope.launch {
             val stored = try {
@@ -206,6 +220,7 @@ private fun ApiKeyCard() {
                 visible = false
                 checkState = CheckState.Idle
                 savedCount++
+                focusManager.clearFocus()
             }
             Toast.makeText(
                 context,
@@ -236,7 +251,11 @@ private fun ApiKeyCard() {
             )
             OutlinedTextField(
                 value = draft,
-                onValueChange = { draft = it },
+                onValueChange = {
+                    draft = it
+                    // The last answer was about the saved key, not about what is being typed.
+                    checkState = CheckState.Idle
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 label = { Text(if (hasKey) "Replace key" else "API key") },
@@ -259,11 +278,12 @@ private fun ApiKeyCard() {
                 ) { Text("Save") }
                 OutlinedButton(
                     onClick = { runCheck() },
-                    enabled = hasKey && checkState !is CheckState.Running,
+                    // It asks about the saved key; with a new one half-entered that would be a different answer.
+                    enabled = hasKey && draft.isBlank() && checkState !is CheckState.Running,
                     modifier = Modifier.weight(1f),
                 ) { Text("Check key") }
             }
-            CheckStatus(checkState)
+            CheckStatus(checkState, officialServer)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { openKeyPage(context) }) { Text("Get a key") }
                 Spacer(Modifier.weight(1f))
@@ -301,17 +321,32 @@ private fun ApiKeyCard() {
 }
 
 @Composable
-private fun CheckStatus(state: CheckState) {
+private fun CheckStatus(state: CheckState, officialServer: Boolean) {
     val style = MaterialTheme.typography.bodySmall
     val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
     when (state) {
         CheckState.Idle -> Unit
         CheckState.Running -> Text("Asking the server…", style = style, color = muted)
         is CheckState.Done -> when (val result = state.result) {
-            KeyCheckResult.Valid -> Text("The server accepted this key.", style = style, color = KeyAcceptedColor)
+            KeyCheckResult.Valid -> if (officialServer) {
+                Text("The server accepted this key.", style = style, color = KeyAcceptedColor)
+            } else {
+                // Some gateways list their models to anyone, so an answer proves little.
+                Text(
+                    "The server answered and did not refuse this key. Some providers do not check keys when " +
+                        "listing models, so your first photo is the real test.",
+                    style = style,
+                    color = muted,
+                )
+            }
             KeyCheckResult.Rejected -> Text(
                 "The server refused this key. Check that it was copied in full and has not been revoked. " +
                     "A restricted key may also need permission to list models.",
+                style = style,
+                color = KeyRefusedColor,
+            )
+            KeyCheckResult.Malformed -> Text(
+                "This key has a space, line break or special character, which no key has. Remove it and paste the key again.",
                 style = style,
                 color = KeyRefusedColor,
             )
@@ -488,6 +523,14 @@ private fun CaptureCard() {
                 "Saving to your gallery needs storage permission on this phone.",
                 Toast.LENGTH_LONG,
             ).show()
+        }
+    }
+
+    // The switch starts on, but Android 9 and older can only write to Pictures once
+    // allowed. Ask here, or it would read "on" while nothing was ever copied.
+    LaunchedEffect(Unit) {
+        if (container.settings.value.saveToPhoneGallery && PhoneGallery.needsLegacyPermission(context)) {
+            legacyStorage.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
     }
 

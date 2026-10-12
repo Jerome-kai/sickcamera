@@ -1,5 +1,7 @@
 package io.github.jeromekai.latent.models
 
+import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,8 +40,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,12 +66,20 @@ import io.github.jeromekai.latent.core.model.ImageApi
 import io.github.jeromekai.latent.core.model.ModelPreset
 import io.github.jeromekai.latent.core.model.Normalize
 import io.github.jeromekai.latent.core.model.ProviderRecipe
+import io.github.jeromekai.latent.core.model.Settings
 import io.github.jeromekai.latent.ui.GlassCard
 import io.github.jeromekai.latent.ui.ScreenScaffold
 import io.github.jeromekai.latent.ui.SectionTitle
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.debounce
-import java.io.IOException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private const val TAG = "ModelsScreen"
 
 /**
  * A row as it is being edited. The store drops a preset with no model name, so
@@ -86,6 +100,63 @@ private data class Draft(
 private fun ModelPreset.toDraft() = Draft(id = id, label = label, model = model, api = api)
 
 private fun Draft.toPreset() = ModelPreset(id = id, label = label.trim(), model = model.trim(), api = api)
+
+/**
+ * The rows as typed, half-filled ones included, so turning the phone does not
+ * throw away a row that has not got a model name yet.
+ */
+private val DraftsSaver: Saver<SnapshotStateList<Draft>, Any> = listSaver<SnapshotStateList<Draft>, Any>(
+    save = { rows -> rows.map { listOf<Any>(it.id, it.label, it.model, it.api.wire, it.touched) } },
+    restore = { saved ->
+        saved.mapNotNull { row ->
+            val fields = row as? List<*> ?: return@mapNotNull null
+            if (fields.size < 5) return@mapNotNull null
+            Draft(
+                id = fields[0] as? String ?: return@mapNotNull null,
+                label = fields[1] as? String ?: "",
+                model = fields[2] as? String ?: "",
+                api = ImageApi.fromWire(fields[3] as? String),
+                touched = fields[4] as? Boolean ?: true,
+            )
+        }.takeIf { it.isNotEmpty() }?.toMutableStateList()
+    },
+)
+
+/**
+ * Every write happens here: off the main thread (each one is an fsync) and in
+ * the order it was asked for. The scope belongs to the process rather than the
+ * screen, so an edit made just before leaving still lands.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+private val writer = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+
+/**
+ * Saves the complete rows and then, when given, a settings change that depends
+ * on them having landed: a selection must never point at a row the store has
+ * not got yet.
+ */
+private fun writeModels(context: Context, complete: List<ModelPreset>, settingsChange: ((Settings) -> Settings)?) {
+    val appContext = context.applicationContext
+    val container = appContext.container
+    writer.launch {
+        try {
+            // An empty list would make the store fall back to its stock preset.
+            // Compared as the store will normalise it, so a blank label (which
+            // the store fills in) does not make every save look like a change.
+            if (complete.isNotEmpty() &&
+                Normalize.modelPresets(Normalize.modelPresetsToJson(complete)) != container.models.value
+            ) {
+                container.models.replaceAll(complete)
+            }
+            settingsChange?.let { container.settings.update(it) }
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not save the models", error)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(appContext, "Could not save your changes", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
 
 /** What the row is called on screen: the store's own fallback is the model after the last '/'. */
 private fun Draft.displayName(): String =
@@ -133,25 +204,26 @@ fun ModelsScreen(onBack: () -> Unit) {
     val settings by container.settings.settings.collectAsStateWithLifecycle()
     val queue by container.queue.collectAsStateWithLifecycle()
 
-    val drafts = remember { container.models.value.map { it.toDraft() }.toMutableStateList() }
+    // Saved across a rotation: the activity is rebuilt, and rows not yet written
+    // (no model name) would otherwise be lost with it.
+    val drafts = rememberSaveable(saver = DraftsSaver) {
+        container.models.value.map { it.toDraft() }.toMutableStateList()
+    }
     var focusId by remember { mutableStateOf<String?>(null) }
-    var pendingRecipe by remember { mutableStateOf<ProviderRecipe?>(null) }
-    var removingId by remember { mutableStateOf<String?>(null) }
+    // The recipe is kept by id, which can be saved; the question survives a rotation too.
+    var pendingRecipeId by rememberSaveable { mutableStateOf<String?>(null) }
+    val pendingRecipe = Defaults.providerRecipes.firstOrNull { it.id == pendingRecipeId }
+    var removingId by rememberSaveable { mutableStateOf<String?>(null) }
 
     // What the camera really uses, read from the store rather than the drafts.
     val activeId = (presets.firstOrNull { it.id == settings.selectedModelId } ?: presets.firstOrNull())?.id.orEmpty()
     // With no complete row the store keeps its last good list, so say that.
     val nothingComplete = drafts.none { it.hasModel }
 
-    fun persist() {
-        val complete = drafts.filter { it.hasModel }.map { it.toPreset() }
-        // An empty list would make the store fall back to its stock preset.
-        if (complete.isEmpty() || complete == container.models.value) return
-        try {
-            container.models.replaceAll(complete)
-        } catch (_: IOException) {
-            Toast.makeText(context, "Could not save the model list", Toast.LENGTH_SHORT).show()
-        }
+    // Saves the complete rows, then [settingsChange] if there is one. The rows are
+    // copied here, on the main thread; the write itself happens off it.
+    fun persist(settingsChange: ((Settings) -> Settings)? = null) {
+        writeModels(context, drafts.filter { it.hasModel }.map { it.toPreset() }, settingsChange)
     }
 
     // Typing writes after a pause rather than per keystroke: every write is an fsync.
@@ -167,13 +239,13 @@ fun ModelsScreen(onBack: () -> Unit) {
     }
 
     fun select(id: String) {
-        // Flush first, so the store knows the row before settings points at it.
-        persist()
-        container.settings.update { it.copy(selectedModelId = id) }
+        // In one write, after the rows, so settings never points at a row the store lacks.
+        persist { it.copy(selectedModelId = id) }
     }
 
     fun add() {
-        val taken = drafts.map { it.id }.toSet()
+        // A stale selection must not claim a new row just because it reuses an old id.
+        val taken = drafts.map { it.id }.toSet() + settings.selectedModelId
         var number = drafts.size + 1
         while ("model-$number" in taken) number += 1
         val id = "model-$number"
@@ -188,12 +260,8 @@ fun ModelsScreen(onBack: () -> Unit) {
         val draft = drafts.firstOrNull { it.id == id } ?: return
         if (!canRemove(draft)) return
         drafts.remove(draft)
-        persist()
-        if (id == activeId) {
-            drafts.firstOrNull { it.hasModel }?.let { next ->
-                container.settings.update { it.copy(selectedModelId = next.id) }
-            }
-        }
+        val next = if (id == activeId) drafts.firstOrNull { it.hasModel } else null
+        if (next != null) persist { it.copy(selectedModelId = next.id) } else persist()
     }
 
     fun applyRecipe(recipe: ProviderRecipe) {
@@ -204,8 +272,7 @@ fun ModelsScreen(onBack: () -> Unit) {
         val index = drafts.indexOfFirst { it.id == preset.id }.takeIf { it >= 0 }
             ?: drafts.indexOfFirst { it.model.trim() == preset.model }
         if (index >= 0) drafts[index] = draft else drafts.add(draft)
-        persist()
-        container.settings.update {
+        persist {
             it.copy(
                 baseUrl = recipe.baseUrl,
                 magicApi = recipe.magicApi,
@@ -228,7 +295,7 @@ fun ModelsScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             GlassCard {
-                Text("Turning the dial on the camera changes the model for the next photo only.")
+                Text("Picking a model here, or on the dial at the bottom of the camera, changes the model for the next photo only.")
                 Spacer(Modifier.height(4.dp))
                 Text("Photos already queued keep the model they were taken with.")
             }
@@ -277,7 +344,7 @@ fun ModelsScreen(onBack: () -> Unit) {
                     RecipeCard(
                         recipe = recipe,
                         inUse = recipe.servesBaseUrl(settings.baseUrl),
-                        onClick = { pendingRecipe = recipe },
+                        onClick = { pendingRecipeId = recipe.id },
                     )
                 }
             }
@@ -302,14 +369,14 @@ fun ModelsScreen(onBack: () -> Unit) {
 
     pendingRecipe?.let { recipe ->
         AlertDialog(
-            onDismissRequest = { pendingRecipe = null },
+            onDismissRequest = { pendingRecipeId = null },
             title = { Text("Switch to ${recipe.name}?") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("This changes where your photos are sent.")
                     Text("Server: ${recipe.baseUrl.ifEmpty { "api.openai.com (the default)" }}")
                     Text("Magic prompts use: ${recipe.magicModel}")
-                    Text("Adds ${recipe.model.label} (${recipe.model.model}) to your models and makes it the active one.")
+                    Text("Adds or updates ${recipe.model.label} (${recipe.model.model}) in your models and makes it the active one.")
                     Text("${recipe.needs()} Add it in Settings if you have not yet.")
                     // The job pins its model, but the server is read when it runs.
                     if (queue.pending > 0) {
@@ -321,9 +388,9 @@ fun ModelsScreen(onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { pendingRecipe = null; applyRecipe(recipe) }) { Text("Switch") }
+                TextButton(onClick = { pendingRecipeId = null; applyRecipe(recipe) }) { Text("Switch") }
             },
-            dismissButton = { TextButton(onClick = { pendingRecipe = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { pendingRecipeId = null }) { Text("Cancel") } },
         )
     }
 }

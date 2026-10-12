@@ -16,6 +16,7 @@ import io.github.jeromekai.latent.data.Images
 import io.github.jeromekai.latent.data.PhoneGallery
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -51,18 +52,19 @@ class GenerationWorker(appContext: Context, params: WorkerParameters) : Coroutin
         val output = container.gallery.resolve(job.generatedPath)
             ?: return giveUp(job, "The output path is invalid.")
 
-        // A previous attempt may have finished the file and died before
-        // tidying up; don't pay for the same image twice.
-        if (Images.isUsableImage(output)) {
-            finish(job, output, skippedReferences = 0)
-            return Result.success()
-        }
-
-        val capture = container.gallery.resolve(job.capturePath)?.takeIf { it.isFile }
-            ?: return giveUp(job, "The original photo is missing.")
-
+        // Everything below sits inside the try, including tidying up an already
+        // finished file: a disk error there must schedule a retry, not kill the
+        // worker with the job file left behind and no work behind it.
         return try {
-            concurrency.withPermit { attempt(job, capture, output) }
+            // A previous attempt may have finished the file and died before
+            // tidying up; don't pay for the same image twice.
+            if (Images.isUsableImage(output)) {
+                finish(job, output, skippedReferences = 0)
+            } else {
+                val capture = container.gallery.resolve(job.capturePath)?.takeIf { it.isFile }
+                    ?: return giveUp(job, "The original photo is missing.")
+                concurrency.withPermit { attempt(job, capture, output) }
+            }
             Result.success()
         } catch (error: CancellationException) {
             // WorkManager stopped us (the network dropped). It reschedules on
@@ -70,6 +72,16 @@ class GenerationWorker(appContext: Context, params: WorkerParameters) : Coroutin
             throw error
         } catch (error: ImageGenException) {
             onFailure(job, error.message ?: "Generation failed", error.retryable)
+        } catch (error: IllegalArgumentException) {
+            // OkHttp refuses to send a key with a stray invisible character in
+            // it, or a server address with no https://. Neither gets better by
+            // waiting, so don't burn twelve attempts over ninety minutes on it.
+            // (OkHttp leaves the key out of its message.)
+            onFailure(
+                job,
+                "The API key or server address can't be used (${error.message ?: "invalid value"}). Check Settings.",
+                retryable = false,
+            )
         } catch (error: Exception) {
             onFailure(job, error.message ?: error.javaClass.simpleName, retryable = true)
         }
@@ -110,7 +122,10 @@ class GenerationWorker(appContext: Context, params: WorkerParameters) : Coroutin
 
     private suspend fun finish(job: GenerationJob, output: File, skippedReferences: Int) {
         val container = applicationContext.container
-        withContext(Dispatchers.IO) {
+        // Not cancellable: once the image is on disk, being stopped between
+        // deleting the job file and telling the album would leave a finished
+        // photo the album never hears about (nothing re-runs a deleted job).
+        withContext(Dispatchers.IO + NonCancellable) {
             container.gallery.writeMetadata(
                 output,
                 GenerationMetadata(
@@ -131,16 +146,23 @@ class GenerationWorker(appContext: Context, params: WorkerParameters) : Coroutin
             )
             container.jobs.delete(job.id)
             if (container.settings.value.saveToPhoneGallery) {
-                PhoneGallery.saveToPictures(applicationContext, output)
+                // The copy in Pictures is a bonus. If it fails the image is
+                // already in the album, and failing here would report a good
+                // result as lost (and the job file is gone by now).
+                runCatching { PhoneGallery.saveToPictures(applicationContext, output) }
             }
         }
         container.onGenerationComplete()
-        val note = if (skippedReferences > 0) " ($skippedReferences reference image(s) not supported by this model)" else ""
-        Notifications.ready(applicationContext, job.id, job.promptTitle + note)
+        val detail = skippedReferences.takeIf { it > 0 }
+            ?.let { "$it reference image(s) skipped: this model takes only the photo." }
+        Notifications.ready(applicationContext, job.id, job.promptTitle, detail)
     }
 
     private fun onFailure(job: GenerationJob, message: String, retryable: Boolean): Result {
         val container = applicationContext.container
+        // Dismissed from the queue sheet while this attempt was in flight:
+        // saving it again now would bring back a photo the user threw away.
+        if (container.jobs.load(job.id) == null) return Result.success()
         return when (val outcome = RetryPolicy.afterFailure(job.attempts, retryable, container.settings.value.maxAttempts)) {
             is RetryPolicy.Outcome.Retry -> {
                 container.jobs.save(job.copy(attempts = outcome.attempts, lastError = message))

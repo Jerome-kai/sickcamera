@@ -1,5 +1,6 @@
 package io.github.jeromekai.latent.camera
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,6 +46,7 @@ import io.github.jeromekai.latent.AppContainer
 import io.github.jeromekai.latent.core.model.Prompt
 import io.github.jeromekai.latent.core.queue.GenerationJob
 import io.github.jeromekai.latent.core.queue.RetryPolicy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -117,18 +120,32 @@ fun PromptPickerSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueueSheet(container: AppContainer, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val queue by container.queue.collectAsStateWithLifecycle()
     var jobs by remember { mutableStateOf<List<GenerationJob>>(emptyList()) }
+    // Until the first read lands the list is empty only because it is unread,
+    // and "Nothing waiting." would flash up over a queue that is not empty.
+    var loaded by remember { mutableStateOf(false) }
     var version by remember { mutableStateOf(0) }
     // Reload when our own edit lands and when the badge's counts move, so a
     // photo that finishes while the sheet is open drops off the list.
-    LaunchedEffect(version, queue) { jobs = withContext(Dispatchers.IO) { container.jobs.all() } }
+    LaunchedEffect(version, queue) {
+        jobs = withContext(Dispatchers.IO) { container.jobs.all() }
+        loaded = true
+    }
 
     // retry/dismiss read and write job files, so they run off the main thread.
+    // A failed write (full storage) is said, not left to crash the app.
     fun act(change: () -> Unit) {
         scope.launch {
-            withContext(Dispatchers.IO) { change() }
+            try {
+                withContext(Dispatchers.IO) { change() }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Toast.makeText(context, "Could not update the queue: ${error.message ?: "unknown error"}", Toast.LENGTH_SHORT).show()
+            }
             version++
         }
     }
@@ -137,7 +154,7 @@ fun QueueSheet(container: AppContainer, onDismiss: () -> Unit) {
         Column(Modifier.navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 20.dp)) {
             Text("Queue", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
-            if (jobs.isEmpty()) {
+            if (loaded && jobs.isEmpty()) {
                 Text("Nothing waiting.", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
             }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -148,6 +165,8 @@ fun QueueSheet(container: AppContainer, onDismiss: () -> Unit) {
                     ) {
                         Text("${job.promptTitle} · ${job.model.substringAfterLast('/')}", fontWeight = FontWeight.SemiBold)
                         val state = when {
+                            // A job refused before any attempt (its photo went missing) has no count to quote.
+                            job.failed && job.attempts == 0 -> "Gave up"
                             job.failed -> "Gave up after ${job.attempts} attempt(s)"
                             job.attempts > 0 -> "Retrying (attempt ${job.attempts + 1}, waits up to ${RetryPolicy.delaySeconds(job.attempts)}s)"
                             else -> "Waiting for its turn"

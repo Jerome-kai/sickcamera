@@ -49,6 +49,12 @@ class SecureKeyStore(context: Context) {
         return generator.generateKey()
     }
 
+    private fun encrypt(plain: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+        return cipher.iv + cipher.doFinal(plain)
+    }
+
     @Synchronized
     fun set(apiKey: String) {
         val trimmed = apiKey.trim()
@@ -56,9 +62,17 @@ class SecureKeyStore(context: Context) {
             clear()
             return
         }
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-        val payload = cipher.iv + cipher.doFinal(trimmed.toByteArray(Charsets.UTF_8))
+        val plain = trimmed.toByteArray(Charsets.UTF_8)
+        val payload = try {
+            encrypt(plain)
+        } catch (_: Exception) {
+            // A Keystore entry that cannot encrypt (corrupted, or broken by a
+            // system update) would fail every save from now on and leave the
+            // app with no way to take a key. Whatever it once sealed is
+            // replaced by this save anyway, so drop it and start a fresh one.
+            runCatching { KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(ALIAS) }
+            encrypt(plain)
+        }
         prefs.edit().putString(PREF_KEY, Base64.encodeToString(payload, Base64.NO_WRAP)).apply()
         _hasKey.value = true
     }

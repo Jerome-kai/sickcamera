@@ -1,6 +1,7 @@
 package io.github.jeromekai.latent.settings
 
 import io.github.jeromekai.latent.core.api.ApiEndpoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -29,11 +30,21 @@ sealed interface KeyCheckResult {
     /** The server answered 401 or 403. */
     data object Rejected : KeyCheckResult
 
+    /** The key holds a character no key has (see [isSendableKey]), so it was never sent. */
+    data object Malformed : KeyCheckResult
+
     /** [reason] is a full sentence for the owner and never contains the key. */
     data class Unverified(val reason: String) : KeyCheckResult
 }
 
 private const val CHECK_TIMEOUT_SECONDS = 10L
+
+/**
+ * Keys are visible ASCII and nothing else. A line break or a curly quote from a
+ * careless paste is not, and OkHttp throws when such a character reaches a
+ * header, so it has to be caught before a request is built.
+ */
+internal fun isSendableKey(key: String): Boolean = key.isNotEmpty() && key.all { it.code in 0x21..0x7E }
 
 private val checkClient: OkHttpClient = OkHttpClient.Builder()
     .callTimeout(CHECK_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -44,12 +55,17 @@ private val checkClient: OkHttpClient = OkHttpClient.Builder()
     .build()
 
 /**
- * Asks the server to list its models, the cheapest authenticated call every
- * OpenAI-compatible endpoint has. Costs nothing and generates nothing.
+ * Asks the server to list its models, the cheapest call every OpenAI-compatible
+ * endpoint has. Costs nothing and generates nothing. OpenAI answers it only for
+ * a good key, but some gateways list models to anyone, so [KeyCheckResult.Valid]
+ * from a different server proves less; the screen says so.
  */
 suspend fun checkKey(endpoint: ApiEndpoint): KeyCheckResult = withContext(Dispatchers.IO) {
     val key = endpoint.apiKey.trim()
     if (key.isEmpty()) return@withContext KeyCheckResult.Unverified("There is no key to check yet.")
+
+    // Checked before the request is built: a header OkHttp refuses would throw out of here.
+    if (!isSendableKey(key)) return@withContext KeyCheckResult.Malformed
 
     val base = endpoint.resolvedBase
     // Never send a key in the clear, even if a hand-edited settings file asks to.
@@ -86,6 +102,11 @@ suspend fun checkKey(endpoint: ApiEndpoint): KeyCheckResult = withContext(Dispat
                 else -> "The server could not be reached."
             },
         )
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        // A button that only asks a question must never take the app down.
+        KeyCheckResult.Unverified("The check could not be completed.")
     }
 }
 

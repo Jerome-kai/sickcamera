@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -37,6 +38,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -69,6 +71,7 @@ import io.github.jeromekai.latent.core.model.Normalize
 import io.github.jeromekai.latent.core.model.Prompt
 import io.github.jeromekai.latent.ui.GlassCard
 import io.github.jeromekai.latent.ui.ScreenScaffold
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -108,6 +111,8 @@ fun PromptsScreen(onBack: () -> Unit) {
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
+    // Set once a back tap found the save failing: asking again means leave anyway.
+    var giveUpOnSave by remember { mutableStateOf(false) }
     var scrollTo by remember { mutableStateOf<String?>(null) }
     // Survives the activity being recreated while the system picker is up.
     var pickTarget by rememberSaveable { mutableStateOf<String?>(null) }
@@ -118,9 +123,10 @@ fun PromptsScreen(onBack: () -> Unit) {
 
     val selectedId = (prompts.firstOrNull { it.id == settings.selectedPromptId } ?: prompts.firstOrNull())?.id
 
-    suspend fun flush() {
+    /** True when nothing is left unsaved by a failed write. */
+    suspend fun flush(): Boolean {
         val pending = dirty.mapNotNull { id -> drafts[id]?.let { id to it } }
-        if (pending.isEmpty()) return
+        if (pending.isEmpty()) return true
         try {
             withContext(Dispatchers.IO) {
                 // Through edit() so a prompt's reference image is never disturbed by a text edit.
@@ -130,7 +136,7 @@ fun PromptsScreen(onBack: () -> Unit) {
             }
         } catch (_: IOException) {
             status = "Save failed."
-            return
+            return false
         }
         // Typing during the write leaves a newer draft behind; that one stays dirty.
         pending.forEach { (id, draft) ->
@@ -138,6 +144,7 @@ fun PromptsScreen(onBack: () -> Unit) {
             if (latest == null || latest == draft) dirty.remove(id)
         }
         if (dirty.isEmpty()) status = "Saved."
+        return true
     }
 
     fun edit(prompt: Prompt, change: (Draft) -> Draft) {
@@ -146,6 +153,7 @@ fun PromptsScreen(onBack: () -> Unit) {
         if (next == current) return
         drafts[prompt.id] = next
         dirty += prompt.id
+        giveUpOnSave = false
         status = "Saving..."
         edits += 1
     }
@@ -155,8 +163,15 @@ fun PromptsScreen(onBack: () -> Unit) {
         if (leaving) return
         leaving = true
         if (dirty.isEmpty()) onBack() else scope.launch {
-            flush()
-            onBack()
+            // A failed write keeps the screen, and the text on it, for another
+            // try; going back regardless would throw the edit away unseen.
+            if (flush() || giveUpOnSave) {
+                onBack()
+            } else {
+                giveUpOnSave = true
+                leaving = false
+                status = "Save failed. Go back again to leave without saving."
+            }
         }
     }
 
@@ -187,6 +202,22 @@ fun PromptsScreen(onBack: () -> Unit) {
                 drafts.remove(prompt.id)
                 dirty.remove(prompt.id)
                 imageVersions.remove(prompt.id)
+                // The camera falls back to the first prompt when the one in use
+                // is removed. Record that: the store reuses ids, so a dangling
+                // selection would silently land on the next prompt added under
+                // the removed one's id.
+                if (container.settings.value.selectedPromptId == prompt.id) {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            container.settings.update { current ->
+                                if (current.selectedPromptId != prompt.id) current
+                                else current.copy(selectedPromptId = container.prompts.value.first().id)
+                            }
+                        }
+                    } catch (_: IOException) {
+                        status = "Could not select the prompt."
+                    }
+                }
             } else {
                 status = "Could not remove the prompt."
             }
@@ -238,6 +269,27 @@ fun PromptsScreen(onBack: () -> Unit) {
         }
     }
 
+    // Leaving by any route but our own back handling (a rotation, a
+    // notification that jumps to the album) would drop an edit still inside the
+    // debounce window, and this screen's scope is cancelled by then: write from
+    // a scope of its own. A no-op after a normal back, which has saved already.
+    DisposableEffect(Unit) {
+        onDispose {
+            val pending = dirty.mapNotNull { id -> drafts[id]?.let { id to it } }
+            if (pending.isNotEmpty()) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        pending.forEach { (id, draft) ->
+                            container.prompts.edit(id) { it.copy(title = draft.title, body = draft.body) }
+                        }
+                    } catch (_: IOException) {
+                        // Nowhere left to say so.
+                    }
+                }
+            }
+        }
+    }
+
     // A new prompt lands on top, but a lazy list keeps the row it was showing
     // in view; scroll once the list has actually grown.
     LaunchedEffect(scrollTo, prompts) {
@@ -262,7 +314,15 @@ fun PromptsScreen(onBack: () -> Unit) {
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                // The scaffold already padded for the nav bar; without this the
+                // keyboard would add that height a second time.
+                .consumeWindowInsets(padding)
+                .imePadding(),
+        ) {
             // Always takes its height, so the list does not jump as messages come and go.
             Text(
                 status,

@@ -55,7 +55,13 @@ object PromptReferences {
             // Copied to a temp file first: the size cap is counted on the bytes
             // actually read (a provider's reported size can be missing or wrong),
             // and the EXIF-aware decoder wants a file it can open twice.
-            val copy = File.createTempFile("reference-", ".tmp", context.cacheDir)
+            val copy = try {
+                File.createTempFile("reference-", ".tmp", context.cacheDir)
+            } catch (_: IOException) {
+                // A full disk lands here. Thrown out of this function it would
+                // reach the screen's coroutine scope and take the app down.
+                return@withContext Outcome.Failed("Image upload failed.")
+            }
             try {
                 if (!copyCapped(context, uri, copy)) {
                     return@withContext Outcome.Failed("That image is over 12 MB. Pick a smaller one.")

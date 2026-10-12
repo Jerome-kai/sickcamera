@@ -33,8 +33,12 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.jeromekai.latent.AppContainer
@@ -108,7 +112,13 @@ fun GenerationSettingsSection() {
         FieldLabel("Quality")
         Spacer(Modifier.height(8.dp))
         SegmentedChoice(QUALITIES, settings.quality) { value -> save { it.copy(quality = value) } }
-        FieldNote("Higher quality costs more and takes longer. Auto lets the model decide.")
+        // The Chat and Generations clients send neither field (the camera's did
+        // not either), so say so rather than let a dial look like it does something.
+        FieldNote(
+            "Higher quality costs more and takes longer. Auto lets the model decide. " +
+                "Quality and output size only reach models set up with the Edits API; " +
+                "Chat and Generations models choose their own.",
+        )
 
         Spacer(Modifier.height(16.dp))
         SizeField(settings.size) { value -> save { it.copy(size = value) } }
@@ -151,7 +161,13 @@ fun GenerationSettingsSection() {
                 modifier = Modifier.weight(1f),
             ) { value -> save { it.copy(inputHeight = value) } }
         }
-        FieldNote("Each photo is scaled to this size before it is uploaded. A smaller upload is faster and cheaper; a larger one gives the model more detail to work with.")
+        // Images.fitForGeneration crops to 4:3 first and then scales to exactly
+        // this size, so any other shape stretches the photo (the camera did too).
+        FieldNote(
+            "Each photo is cropped to 4:3 and scaled to this size before it is uploaded, so keep the two " +
+                "numbers in a 4:3 ratio (such as 1280 and 960) or the photo is stretched. A smaller upload " +
+                "is faster and cheaper; a larger one gives the model more detail to work with.",
+        )
     }
 
     // ---- timeout -----------------------------------------------------------------
@@ -311,7 +327,18 @@ private fun <T> SegmentedChoice(options: List<Pair<T, String>>, selected: T, onS
                     activeBorderColor = accent,
                 ),
                 icon = {},
-                label = { Text(label, maxLines = 1) },
+                // labelMedium and no wrapping: "Medium" at the default label size is
+                // a hair wider than one of four segments on a 360 dp phone and
+                // would otherwise break mid-word.
+                label = {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
             )
         }
     }
@@ -432,6 +459,12 @@ private fun IntSettingSlider(
         )
     }
     Slider(
+        // Without these a screen reader announces an unnamed slider at a
+        // percentage of its range, which for 90 s in 10..600 is a wrong number.
+        modifier = Modifier.semantics {
+            contentDescription = label
+            stateDescription = display(shown)
+        },
         value = shown.toFloat(),
         onValueChange = { raw ->
             dragging = ((raw / step).roundToInt() * step).coerceIn(range.first, range.last)

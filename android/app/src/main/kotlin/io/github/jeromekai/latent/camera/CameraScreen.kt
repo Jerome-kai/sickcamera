@@ -1,9 +1,12 @@
 package io.github.jeromekai.latent.camera
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -79,6 +82,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,12 +95,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.jeromekai.latent.container
 import io.github.jeromekai.latent.core.model.ModelPreset
 import io.github.jeromekai.latent.ui.Amber
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -108,6 +121,20 @@ private const val SHUTTER_DEBOUNCE_MS = 125L
 
 /** CAPTURE_FEEDBACK_DURATION_SECONDS default. */
 private const val FEEDBACK_MS = 250
+
+private fun hasCameraPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+/** After "Don't ask again" the system shows no dialog, so the app's own settings page is the only way back. */
+private fun openAppSettings(context: Context) {
+    val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        // A phone with no settings page to open: nothing more to offer.
+    }
+}
 
 private suspend fun cameraProvider(context: Context): ProcessCameraProvider =
     suspendCancellableCoroutine { continuation ->
@@ -133,11 +160,27 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val container = context.container
-    var granted by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
-    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var granted by remember { mutableStateOf(hasCameraPermission(context)) }
+    // Saveable: asked once, not again on every return from the album or after a rotation.
+    var asked by rememberSaveable { mutableStateOf(false) }
     val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
-    LaunchedEffect(Unit) { if (!granted) askCamera.launch(Manifest.permission.CAMERA) }
+    LaunchedEffect(Unit) {
+        if (!granted && !asked) {
+            asked = true
+            askCamera.launch(Manifest.permission.CAMERA)
+        }
+    }
+    // Back from the system's settings page, where the permission may have been given.
+    DisposableEffect(lifecycleOwner) {
+        val observer = object : LifecycleEventObserver {
+            override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+                if (event == Lifecycle.Event.ON_RESUME) granted = hasCameraPermission(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (granted) {
@@ -150,6 +193,16 @@ fun CameraScreen(
                 Text("Latent needs the camera to take photos.", color = Color.White, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
                 Button(onClick = { askCamera.launch(Manifest.permission.CAMERA) }) { Text("Allow camera") }
+                Text(
+                    "Open app settings",
+                    color = Amber,
+                    modifier = Modifier.clickable { openAppSettings(context) }.padding(12.dp),
+                )
+                // The photos already made and the API key do not need the camera.
+                Row {
+                    Text("Album", color = Color.White, modifier = Modifier.clickable(onClick = onOpenAlbum).padding(12.dp))
+                    Text("Settings", color = Color.White, modifier = Modifier.clickable(onClick = onOpenSettings).padding(12.dp))
+                }
             }
         }
     }
@@ -183,6 +236,9 @@ private fun CameraContent(
     var flashMode by rememberSaveable { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
     var showPicker by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
+    // Most front cameras have no flash, and CameraX ignores the mode on a lens
+    // without one: the button would sit there and do nothing. Set once bound.
+    var hasFlash by remember { mutableStateOf(true) }
 
     val previewView = remember {
         PreviewView(context).apply {
@@ -209,11 +265,12 @@ private fun CameraContent(
             val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
             val selector = if (lensBack) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
             provider.unbindAll()
-            provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+            val camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+            hasFlash = camera.cameraInfo.hasFlashUnit()
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            session.say("Camera unavailable: ${error.message}", isError = true)
+            session.say("Camera unavailable: ${error.message ?: "unknown error"}", isError = true)
             // A phone with no front camera lands here on flip; go back to the
             // one that works rather than leaving the viewfinder dark.
             if (!lensBack) lensBack = true
@@ -266,7 +323,7 @@ private fun CameraContent(
 
                 override fun onError(exception: ImageCaptureException) {
                     file.delete()
-                    session.say("Capture failed: ${exception.message}", isError = true)
+                    session.say("Capture failed: ${exception.message ?: "unknown error"}", isError = true)
                 }
             },
         )
@@ -326,20 +383,22 @@ private fun CameraContent(
         Column(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RoundIcon(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "Settings", tint = Color.White) }
-                Spacer(Modifier.width(8.dp))
-                RoundIcon(onClick = {
-                    flashMode = when (flashMode) {
-                        ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
-                        ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
-                        else -> ImageCapture.FLASH_MODE_OFF
+                if (hasFlash) {
+                    Spacer(Modifier.width(8.dp))
+                    RoundIcon(onClick = {
+                        flashMode = when (flashMode) {
+                            ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO
+                            ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON
+                            else -> ImageCapture.FLASH_MODE_OFF
+                        }
+                    }) {
+                        val icon = when (flashMode) {
+                            ImageCapture.FLASH_MODE_AUTO -> Icons.Filled.FlashAuto
+                            ImageCapture.FLASH_MODE_ON -> Icons.Filled.FlashOn
+                            else -> Icons.Filled.FlashOff
+                        }
+                        Icon(icon, "Flash", tint = Color.White)
                     }
-                }) {
-                    val icon = when (flashMode) {
-                        ImageCapture.FLASH_MODE_AUTO -> Icons.Filled.FlashAuto
-                        ImageCapture.FLASH_MODE_ON -> Icons.Filled.FlashOn
-                        else -> Icons.Filled.FlashOff
-                    }
-                    Icon(icon, "Flash", tint = Color.White)
                 }
                 Spacer(Modifier.weight(1f))
                 QueueBadge(pending = queue.pending, failed = queue.failed, onClick = { showQueue = true })
@@ -404,7 +463,15 @@ private fun CameraContent(
                     selectedId = container.selectedModel().id,
                     onSelect = { preset ->
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        container.settings.update { it.copy(selectedModelId = preset.id) }
+                        // The store fsyncs the file, so a tap on the wheel must not wait
+                        // on the disk; a failed write (full storage) is said, not a crash.
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                container.settings.update { it.copy(selectedModelId = preset.id) }
+                            } catch (error: Exception) {
+                                session.say("Could not save the model: ${error.message ?: "unknown error"}", isError = true)
+                            }
+                        }
                         session.say("Model: ${preset.label}")
                     },
                 )
@@ -453,7 +520,13 @@ private fun CameraContent(
             prompts = prompts,
             selectedId = container.selectedPrompt().id,
             onSelect = { prompt ->
-                container.settings.update { it.copy(selectedPromptId = prompt.id) }
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        container.settings.update { it.copy(selectedPromptId = prompt.id) }
+                    } catch (error: Exception) {
+                        session.say("Could not save the prompt choice: ${error.message ?: "unknown error"}", isError = true)
+                    }
+                }
                 session.say("Ready with ${prompt.title}")
                 showPicker = false
             },
@@ -539,10 +612,15 @@ private fun ShutterButton(magic: Boolean, onTap: () -> Unit, onHold: () -> Unit)
         Modifier
             .size(84.dp)
             .clip(CircleShape)
-            .border(5.dp, if (magic) Amber else Color.White, CircleShape)
-            .padding(9.dp)
-            .clip(CircleShape)
-            .background(if (pressed) Color.White.copy(alpha = 0.6f) else Color.White)
+            // Ahead of the padding below, so a touch on the white ring counts as
+            // well as one on the disc. The semantics give TalkBack a button to
+            // focus; the raw pointer handling alone is invisible to it.
+            .semantics {
+                role = Role.Button
+                contentDescription = "Shutter"
+                onClick(label = "Take photo") { currentOnTap(); true }
+                onLongClick(label = "Create a magic prompt") { currentOnHold(); true }
+            }
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown()
@@ -558,7 +636,11 @@ private fun ShutterButton(magic: Boolean, onTap: () -> Unit, onHold: () -> Unit)
                     pressed = false
                     if (!held && up != null) currentOnTap()
                 }
-            },
+            }
+            .border(5.dp, if (magic) Amber else Color.White, CircleShape)
+            .padding(9.dp)
+            .clip(CircleShape)
+            .background(if (pressed) Color.White.copy(alpha = 0.6f) else Color.White),
     )
 }
 

@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -229,7 +230,9 @@ private fun clearOriginalPhotos(container: AppContainer, activeRecipePath: Strin
         if (deleted) {
             removed++
             bytes += size
-        } else {
+        } else if (file.exists()) {
+            // A file that is already gone (its recipe was just removed, say) is
+            // not a failure to report.
             failed++
         }
     }
@@ -253,7 +256,8 @@ private fun deleteFinishedOlderThan(container: AppContainer, days: Int): Finishe
         if (deleted) {
             removed++
             bytes += size
-        } else {
+        } else if (item.file.exists()) {
+            // Already gone (deleted from the album meanwhile) is not a failure.
             failed++
         }
     }
@@ -272,7 +276,7 @@ private fun finishedPhotos(count: Int): String = if (count == 1) "1 finished pho
 private fun keptSummary(queued: Int, recipe: Int, recent: Int): String? {
     val reasons = buildList {
         if (queued > 0) add("$queued waiting in the queue")
-        if (recipe > 0) add("$recipe behind magic recipes")
+        if (recipe > 0) add(if (recipe == 1) "1 behind a magic recipe" else "$recipe behind magic recipes")
         if (recent > 0) add("$recent taken in the last $RECENT_MINUTES minutes")
     }
     if (reasons.isEmpty()) return null
@@ -306,7 +310,8 @@ private fun deleteMessage(context: Context, days: Int, result: FinishedDeleted):
 
 private fun originalsWarning(context: Context, plan: OriginalsPlan): String = buildString {
     append("This deletes ${originalPhotos(plan.remove.size)} (${sizeText(context, plan.removeBytes)}) from this phone. ")
-    append("Their finished versions stay in the album, but the Original view will have nothing to show for them. ")
+    // The viewer's own words for a missing original.
+    append("The finished versions stay in the album, but viewing the original of one will say \"No Source Found\". ")
     keptSummary(plan)?.let { append(it).append(' ') }
     append("This cannot be undone.")
 }
@@ -335,10 +340,13 @@ fun StorageSection() {
     val queue by container.queue.collectAsStateWithLifecycle()
 
     var refresh by remember { mutableStateOf(0) }
-    var days by remember { mutableStateOf(DEFAULT_DAYS) }
+    // Saved, because rotating the phone or visiting Edit prompts and coming back
+    // would otherwise snap the age back to 30 days and drop the result line.
+    // The confirmation is not: it holds a scan, and asking again is the safe way.
+    var days by rememberSaveable { mutableStateOf(DEFAULT_DAYS) }
     var busy by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<StorageConfirm?>(null) }
-    var outcome by remember { mutableStateOf<String?>(null) }
+    var outcome by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Walking the folders is disk work, so it runs on IO, and again whenever a
     // photo lands or goes, the queue changes, or an action here finishes. The
@@ -450,7 +458,8 @@ fun StorageSection() {
         Text("Original photos", style = MaterialTheme.typography.titleSmall)
         Note(
             "Clears the photos you took once nothing needs them. Photos waiting in the queue and the photos " +
-                "behind your magic recipes are always kept; remove a recipe in Magic recipes to free its photo.",
+                "behind your magic recipes are always kept; remove a recipe in Magic recipes to free its photo. " +
+                "The recipe the camera is using right now stays until you switch to another.",
         )
         Note(
             when {
