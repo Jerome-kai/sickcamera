@@ -27,8 +27,28 @@ object Normalize {
     const val DEFAULT_NEW_PROMPT_BODY = "Describe the edit you want."
 
     private val NON_ID_CHARS = Regex("[^a-z0-9]+")
-    // (?U): Python's \s matches Unicode whitespace; Java's matches only ASCII.
-    private val WHITESPACE = Regex("(?U)\\s+")
+    // Deliberately NOT a regex. Python's \s matches Unicode whitespace, and the way to
+    // ask Java for that is the inline flag (?U) -- which the JVM accepts and Android's
+    // regex engine rejects with a PatternSyntaxException. It sat in this object's
+    // static initialiser, so the app died in Application.onCreate on every launch
+    // while every desktop test passed. A character check behaves the same on both.
+    private fun isSpace(c: Char) = c.isWhitespace() || c == '\u0085' // NEL: Python counts it, Kotlin does not
+
+    /** Runs of whitespace replaced by [replacement]; leading and trailing runs are kept as one run too. */
+    private fun collapseWhitespace(value: String, replacement: String): String {
+        val out = StringBuilder(value.length)
+        var inRun = false
+        for (c in value) {
+            if (isSpace(c)) {
+                if (!inRun) out.append(replacement)
+                inRun = true
+            } else {
+                out.append(c)
+                inRun = false
+            }
+        }
+        return out.toString()
+    }
     private val NON_USERNAME_CHARS = Regex("[^a-z0-9._-]+")
     private val NON_FILENAME_CHARS = Regex("[^A-Za-z0-9._-]+")
 
@@ -71,10 +91,9 @@ object Normalize {
     fun promptBody(value: JsonElement?): String = text(value).trim().ifEmpty { DEFAULT_NEW_PROMPT_BODY }
 
     fun cameraUsername(value: String): String {
-        val cleaned = value.trim().lowercase()
-            .replace(WHITESPACE, "-")
-            .replace(NON_USERNAME_CHARS, "")
-        return takeCodePoints(cleaned, CAMERA_USERNAME_MAX_LENGTH).trim('.', '_', '-')
+        val cleaned = collapseWhitespace(value.trim { isSpace(it) }.lowercase(), "-")
+        val sanitised = cleaned.replace(NON_USERNAME_CHARS, "")
+        return takeCodePoints(sanitised, CAMERA_USERNAME_MAX_LENGTH).trim('.', '_', '-')
     }
 
     /**
@@ -91,8 +110,8 @@ object Normalize {
     }
 
     fun modelLabel(value: JsonElement?, fallback: String): String {
-        val cleaned = text(value).split(WHITESPACE).filter { it.isNotEmpty() }.joinToString(" ")
-            .ifEmpty { fallback }
+        // " ".join(str.split()): runs of whitespace become one space, the ends are dropped.
+        val cleaned = collapseWhitespace(text(value), " ").trim { isSpace(it) }.ifEmpty { fallback }
         return takeCodePoints(cleaned, MODEL_LABEL_MAX_LENGTH).trim().ifEmpty { fallback }
     }
 
