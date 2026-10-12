@@ -30,6 +30,16 @@
             </intent-filter>
         </activity>
 
+        <!-- A separate process, so it can still appear when the app's own start-up
+             is what crashed. See CrashReporter. -->
+        <activity
+            android:name=".crash.CrashActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:process=":crash"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

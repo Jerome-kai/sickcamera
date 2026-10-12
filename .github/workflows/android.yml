@@ -74,6 +74,41 @@ jobs:
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
+      # "It compiles" and "it opens on a phone" are different claims: a green build
+      # once produced an APK that would not start on Android 16. So the exact APK is
+      # installed on an Android 16 emulator and used like a person would use it, and
+      # a release is published only if that works.
+      - name: Enable KVM for the emulator
+        working-directory: .
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Smoke test on Android 16
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          APK: ${{ steps.apk.outputs.path }}
+          SMOKE_OUT: ${{ github.workspace }}/smoke
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated -camera-front emulated
+          script: bash android/tools/smoke_test.sh "${{ github.workspace }}/${{ steps.apk.outputs.path }}"
+
+      # Kept on failure too: the screenshots and the log are how a crash gets diagnosed.
+      - name: Keep the smoke test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-evidence
+          path: smoke/
+          if-no-files-found: ignore
+
       # A release gives the phone a plain download link -- no GitHub login and
       # no zip to unpack, which an Actions artifact would need. Builds from the
       # dev branch are published as prereleases so they never pose as stable.
