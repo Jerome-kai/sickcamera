@@ -133,9 +133,9 @@ class OpenAiImageEditor(private val baseClient: OkHttpClient? = null) : ImageEdi
         for (item in data.orEmpty()) {
             val obj = item as? JsonObject ?: continue
             for (key in listOf("b64_json", "image_base64")) {
-                val encoded = (obj[key] as? JsonPrimitive)?.content
-                if (!encoded.isNullOrEmpty()) {
-                    val bytes = DataUrls.decode("base64,$encoded")
+                val encoded = Http.stringOrNull(obj[key])
+                if (!encoded.isNullOrBlank()) {
+                    val bytes = DataUrls.decodeBase64(encoded)
                         ?: throw ImageGenException("images/edits returned undecodable image data.", retryable = true)
                     return EditResult(bytes, ImageSniffer.mimeType(bytes) ?: "image/${request.outputFormat}")
                 }
@@ -198,11 +198,7 @@ class OpenAiImageEditor(private val baseClient: OkHttpClient? = null) : ImageEdi
             }
             for (part in parts) {
                 val imageUrl = (part as? JsonObject)?.get("image_url") ?: continue
-                val url = when (imageUrl) {
-                    is JsonObject -> (imageUrl["url"] as? JsonPrimitive)?.content
-                    is JsonPrimitive -> imageUrl.content
-                    else -> null
-                }
+                val url = Http.stringOrNull(if (imageUrl is JsonObject) imageUrl["url"] else imageUrl)
                 DataUrls.decode(url)?.let { return it }
             }
         }
@@ -239,11 +235,11 @@ class OpenAiImageEditor(private val baseClient: OkHttpClient? = null) : ImageEdi
             ?: (obj?.get("data") as? JsonArray).orEmpty()
         for (item in items) {
             val entry = item as? JsonObject ?: continue
-            (entry["b64_json"] as? JsonPrimitive)?.content?.takeIf { it.isNotEmpty() }?.let { encoded ->
-                return DataUrls.decode("base64,$encoded")
+            Http.stringOrNull(entry["b64_json"])?.takeIf { it.isNotBlank() }?.let { encoded ->
+                return DataUrls.decodeBase64(encoded)
                     ?: throw ImageGenException("images/generations returned undecodable image data.", retryable = true)
             }
-            val url = (entry["url"] as? JsonPrimitive)?.content ?: continue
+            val url = Http.stringOrNull(entry["url"])?.trim()?.takeIf { it.isNotEmpty() } ?: continue
             DataUrls.decode(url)?.let { return it }
             return download(client, url)
         }
@@ -260,45 +256,52 @@ class OpenAiImageEditor(private val baseClient: OkHttpClient? = null) : ImageEdi
      * fetch any scheme to any host and read it whole into memory.
      */
     private suspend fun download(client: OkHttpClient, url: String): ByteArray {
-        val parsed = url.toHttpUrlOrNull()
+        // HttpUrl reads "https:/host" as a real host, so the two slashes are checked by hand.
+        val parsed = url.trim().takeIf { Http.HTTPS_ADDRESS.containsMatchIn(it) }?.toHttpUrlOrNull()
         if (parsed == null || !parsed.isHttps) {
             throw ImageGenException("The provider returned an image link that is not https: ${url.take(120)}", retryable = false)
         }
         // No Authorization on this request: the key is for the API, not the CDN.
         val request = Request.Builder().url(parsed).get().build()
-        return withContext(Dispatchers.IO) {
-            try {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw ImageGenException(
-                            "Could not download the generated image: HTTP ${response.code}",
-                            retryable = response.code >= 500 || response.code == 429,
-                        )
-                    }
-                    val body = response.body ?: throw ImageGenException("Empty image download.", retryable = true)
-                    val declared = body.contentLength()
-                    if (declared > MAX_DOWNLOAD_BYTES) {
-                        throw ImageGenException("The generated image is too large to download ($declared bytes).", retryable = false)
-                    }
-                    val source = body.source()
-                    if (!source.request(MAX_DOWNLOAD_BYTES + 1) || source.buffer.size <= MAX_DOWNLOAD_BYTES) {
-                        source.buffer.readByteArray()
-                    } else {
-                        throw ImageGenException("The generated image is too large to download.", retryable = false)
-                    }
-                }
-            } catch (error: IOException) {
-                throw ImageGenException("Could not download the generated image: ${error.message}", retryable = true, cause = error)
-            }
+        // Read inside the callback, like the API calls, so cancelling the coroutine also stops a
+        // body that is still trickling in instead of leaving a worker blocked until the timeout.
+        return try {
+            Http.await(client.newCall(request), ::readDownload)
+        } catch (error: IOException) {
+            throw ImageGenException("Could not download the generated image: ${error.message}", retryable = true, cause = error)
         }
+    }
+
+    private fun readDownload(response: Response): ByteArray {
+        if (!response.isSuccessful) {
+            throw ImageGenException(
+                "Could not download the generated image: HTTP ${response.code}",
+                retryable = Http.isRetryableStatus(response.code),
+                statusCode = response.code,
+            )
+        }
+        val body = response.body ?: throw ImageGenException("Empty image download.", retryable = true)
+        val declared = body.contentLength()
+        if (declared > MAX_DOWNLOAD_BYTES) {
+            throw ImageGenException("The generated image is too large to download ($declared bytes).", retryable = false)
+        }
+        // The declared length can be missing (chunked, or gzip, which OkHttp unpacks) or wrong,
+        // so the cap is enforced on the bytes actually read.
+        val source = body.source()
+        if (source.request(MAX_DOWNLOAD_BYTES + 1)) {
+            throw ImageGenException("The generated image is too large to download.", retryable = false)
+        }
+        val bytes = source.buffer.readByteArray()
+        if (bytes.isEmpty()) throw ImageGenException("The generated image download was empty.", retryable = true)
+        return bytes
     }
 
     // ---- request helpers ----------------------------------------------------
 
     private fun authorized(endpoint: ApiEndpoint, path: String): Request.Builder =
         Request.Builder()
-            .url(endpoint.resolvedBase + path)
-            .header("Authorization", "Bearer ${endpoint.apiKey.trim()}")
+            .url(Http.url(endpoint, path))
+            .header("Authorization", Http.bearer(endpoint.apiKey))
 
     private fun jsonPost(endpoint: ApiEndpoint, path: String, payload: JsonElement): Request =
         authorized(endpoint, path)

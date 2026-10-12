@@ -160,13 +160,23 @@ internal object Http {
         val body = response.body?.string().orEmpty()
         if (response.isSuccessful) return body
         val code = response.code
-        val retryable = code == 408 || code == 409 || code == 429 || code >= 500
         throw ImageGenException(
             "$what failed: HTTP $code: ${errorDetail(body)}",
-            retryable = retryable,
+            retryable = isRetryableStatus(code),
             statusCode = code,
         )
     }
+
+    /** openai-python's retry set: request timeout, conflict, rate limit and every server error. */
+    fun isRetryableStatus(code: Int): Boolean = code == 408 || code == 409 || code == 429 || code >= 500
+
+    /**
+     * The text of a JSON string, or null for anything else. JsonNull.content is the four letters
+     * "null" (valid base64, and a plausible host), so reading `.content` straight off a field the
+     * provider sent as null turned it into data.
+     */
+    fun stringOrNull(element: JsonElement?): String? =
+        (element as? JsonPrimitive)?.takeIf { it.isString }?.content
 
     /** The provider's own error message when it sends OpenAI-style JSON. */
     fun errorDetail(body: String): String {
