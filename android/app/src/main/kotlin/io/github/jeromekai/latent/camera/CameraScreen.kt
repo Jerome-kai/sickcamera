@@ -65,6 +65,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -176,8 +177,10 @@ private fun CameraContent(
     val unseen by container.unseen.collectAsStateWithLifecycle()
     val hasKey by container.secureKey.hasKey.collectAsStateWithLifecycle()
 
-    var lensBack by remember { mutableStateOf(true) }
-    var flashMode by remember { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
+    // Saveable: rotating the phone recreates the Activity, and the lens and
+    // flash choice should not snap back to the rear camera with flash off.
+    var lensBack by rememberSaveable { mutableStateOf(true) }
+    var flashMode by rememberSaveable { mutableStateOf(ImageCapture.FLASH_MODE_OFF) }
     var showPicker by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
 
@@ -278,13 +281,25 @@ private fun CameraContent(
         ShutterBus.events.collect { event -> capture(magic = event == ShutterEvent.MAGIC) }
     }
 
-    // Transient status line, like the camera's status_message.
-    var visibleStatus by remember { mutableStateOf<Status?>(null) }
+    // Transient status line, like the camera's status_message. The text is kept
+    // after the line hides so the fade-out has something to fade.
+    var shownStatus by remember { mutableStateOf<Status?>(null) }
+    var statusVisible by remember { mutableStateOf(false) }
     LaunchedEffect(sessionState.status) {
-        val status = sessionState.status ?: return@LaunchedEffect
-        visibleStatus = status
-        delay(if (status.isError) 5000 else 2500)
-        if (visibleStatus == status) visibleStatus = null
+        val status = sessionState.status
+        val lifeMs = if (status?.isError == true) 5000L else 2500L
+        // Status.id is its creation time (System.nanoTime), so count from then:
+        // the session outlives this screen, and coming back from the album must
+        // not replay a message that was already shown.
+        val remainingMs = if (status == null) 0L else lifeMs - (System.nanoTime() - status.id) / 1_000_000
+        if (status == null || remainingMs <= 0L) {
+            statusVisible = false
+            return@LaunchedEffect
+        }
+        shownStatus = status
+        statusVisible = true
+        delay(remainingMs)
+        statusVisible = false
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -333,7 +348,14 @@ private fun CameraContent(
             TitlePill(
                 text = if (sessionState.magicActive) session.magicPillText(sessionState) else container.selectedPrompt().title,
                 magic = sessionState.magicActive,
-                onClick = { if (sessionState.magicActive) session.exitMagic() else showPicker = true },
+                onClick = {
+                    if (sessionState.magicActive) {
+                        session.exitMagic()
+                    } else {
+                        session.say("Choose a prompt")
+                        showPicker = true
+                    }
+                },
             )
             if (!hasKey) {
                 Spacer(Modifier.height(10.dp))
@@ -351,12 +373,12 @@ private fun CameraContent(
 
         // ---- status line -------------------------------------------------------
         AnimatedVisibility(
-            visible = visibleStatus != null,
+            visible = statusVisible,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center),
         ) {
-            val status = visibleStatus
+            val status = shownStatus
             if (status != null) {
                 Text(
                     status.text,
@@ -383,6 +405,7 @@ private fun CameraContent(
                     onSelect = { preset ->
                         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         container.settings.update { it.copy(selectedModelId = preset.id) }
+                        session.say("Model: ${preset.label}")
                     },
                 )
             } else {
@@ -401,7 +424,9 @@ private fun CameraContent(
             ) {
                 Box {
                     RoundIcon(size = 56, onClick = onOpenAlbum) { Icon(Icons.Filled.PhotoLibrary, "Album", tint = Color.White) }
-                    if (unseen > 0) {
+                    // The camera drew no sparkle in magic mode; it is still counted,
+                    // and shows again once magic mode ends.
+                    if (unseen > 0 && !sessionState.magicActive) {
                         // The camera's pale-yellow sparkle on the album tab.
                         Icon(
                             Icons.Filled.AutoAwesome,
@@ -433,8 +458,15 @@ private fun CameraContent(
                 showPicker = false
             },
             onEdit = { showPicker = false; onOpenPrompts() },
-            onDismiss = { showPicker = false },
-            hasReference = { container.referenceFile(it) != null },
+            onDismiss = {
+                // Backing out leaves the selection alone, and says so, as the camera did.
+                showPicker = false
+                session.say("Ready with ${container.selectedPrompt().title}")
+            },
+            // The marker follows the field alone, not the file: a prompt whose
+            // image has gone missing still shows it (the camera's picker did too),
+            // and this keeps a disk check out of the list's composition.
+            hasReference = { it.referenceImage.isNotEmpty() },
         )
     }
     if (showQueue) {
@@ -485,7 +517,8 @@ private fun QueueBadge(pending: Int, failed: Int, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (pending > 0) Text("$pending", color = Amber, fontWeight = FontWeight.Bold)
+        // The camera capped the badge's number at 9.
+        if (pending > 0) Text("${minOf(pending, 9)}", color = Amber, fontWeight = FontWeight.Bold)
         if (pending > 0 && failed > 0) Spacer(Modifier.width(8.dp))
         if (failed > 0) Text("$failed failed", color = Color(0xFFFF8A80), fontWeight = FontWeight.Bold)
     }

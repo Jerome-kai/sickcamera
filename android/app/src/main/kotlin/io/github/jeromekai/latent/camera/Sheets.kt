@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -29,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,11 +39,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.jeromekai.latent.AppContainer
 import io.github.jeromekai.latent.core.model.Prompt
 import io.github.jeromekai.latent.core.queue.GenerationJob
 import io.github.jeromekai.latent.core.queue.RetryPolicy
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -59,13 +63,18 @@ fun PromptPickerSheet(
     onDismiss: () -> Unit,
     hasReference: (Prompt) -> Boolean,
 ) {
+    // The camera opened its picker on the current prompt; with a long list that
+    // one could otherwise start below the fold.
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (prompts.indexOfFirst { it.id == selectedId } - 1).coerceAtLeast(0),
+    )
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Prompt", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 TextButton(onClick = onEdit) { Text("Edit prompts") }
             }
-            LazyColumn(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            LazyColumn(Modifier.fillMaxWidth().padding(bottom = 16.dp), state = listState) {
                 items(prompts, key = { it.id }) { prompt ->
                     val selected = prompt.id == selectedId
                     Row(
@@ -108,9 +117,21 @@ fun PromptPickerSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueueSheet(container: AppContainer, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val queue by container.queue.collectAsStateWithLifecycle()
     var jobs by remember { mutableStateOf<List<GenerationJob>>(emptyList()) }
     var version by remember { mutableStateOf(0) }
-    LaunchedEffect(version) { jobs = withContext(Dispatchers.IO) { container.jobs.all() } }
+    // Reload when our own edit lands and when the badge's counts move, so a
+    // photo that finishes while the sheet is open drops off the list.
+    LaunchedEffect(version, queue) { jobs = withContext(Dispatchers.IO) { container.jobs.all() } }
+
+    // retry/dismiss read and write job files, so they run off the main thread.
+    fun act(change: () -> Unit) {
+        scope.launch {
+            withContext(Dispatchers.IO) { change() }
+            version++
+        }
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.navigationBarsPadding().padding(horizontal = 20.dp).padding(bottom = 20.dp)) {
@@ -137,9 +158,9 @@ fun QueueSheet(container: AppContainer, onDismiss: () -> Unit) {
                         }
                         Row {
                             if (job.failed) {
-                                TextButton(onClick = { container.scheduler.retry(job.id); version++ }) { Text("Retry") }
+                                TextButton(onClick = { act { container.scheduler.retry(job.id) } }) { Text("Retry") }
                             }
-                            TextButton(onClick = { container.scheduler.dismiss(job.id); version++ }) {
+                            TextButton(onClick = { act { container.scheduler.dismiss(job.id) } }) {
                                 Text(if (job.failed) "Dismiss" else "Cancel")
                             }
                         }
