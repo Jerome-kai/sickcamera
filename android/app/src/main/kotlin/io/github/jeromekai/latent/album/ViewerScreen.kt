@@ -111,13 +111,14 @@ fun ViewerScreen(startPath: String, onBack: () -> Unit) {
         currentPath = items[target].relativePath
         positioned = true
     }
-    // A swipe that has come to rest is the new photo. Followed from the settled
-    // page rather than the moving one, and only after the first placement, so a
-    // list that changes underneath cannot rename the photo being looked at.
+    // A swipe that has come to rest is the new photo. Only a page at rest counts
+    // (the moving page flips halfway through a swipe), and only after the first
+    // placement, so a list that changes underneath cannot rename the photo being
+    // looked at: the list is read when the pager reports, not when it changed.
     LaunchedEffect(positioned) {
         if (!positioned) return@LaunchedEffect
-        snapshotFlow { pager.settledPage }.collect { page ->
-            loaded.value?.getOrNull(page)?.let { currentPath = it.relativePath }
+        snapshotFlow { pager.currentPage to pager.isScrollInProgress }.collect { (page, scrolling) ->
+            if (!scrolling) loaded.value?.getOrNull(page)?.let { currentPath = it.relativePath }
         }
     }
 

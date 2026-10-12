@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.display.DisplayManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.SystemClock
@@ -255,6 +256,24 @@ private fun CameraContent(
         ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build()
     }
     LaunchedEffect(flashMode) { imageCapture.flashMode = flashMode }
+
+    // A 90-degree turn recreates the activity, but flipping a landscape phone 180 degrees
+    // does not, so ImageCapture would keep the old target rotation and stamp the photo
+    // upside down. CameraX's recommended fix: follow the display's rotation.
+    DisposableEffect(imageCapture) {
+        val displays = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayChanged(displayId: Int) {
+                previewView.display?.let { imageCapture.targetRotation = it.rotation }
+            }
+
+            override fun onDisplayAdded(displayId: Int) = Unit
+
+            override fun onDisplayRemoved(displayId: Int) = Unit
+        }
+        displays.registerDisplayListener(listener, null)
+        onDispose { displays.unregisterDisplayListener(listener) }
+    }
 
     LaunchedEffect(lensBack) {
         // The provider future can fail too (camera service down), and an
