@@ -150,8 +150,14 @@ fun MagicScreen(onBack: () -> Unit, onUsed: () -> Unit) {
                             inUse = session.magicActive && isCurrent(entry, session.magic),
                             saving = entry.id in saving,
                             onUse = {
-                                container.session.useMagic(entry)
-                                onUsed()
+                                if (container.settings.value.magicEnabled) {
+                                    container.session.useMagic(entry)
+                                    onUsed()
+                                } else {
+                                    // useMagic refuses while Magic mode is off; staying here
+                                    // beats landing on the camera with nothing happening.
+                                    Toast.makeText(context, "Magic mode is turned off in Settings", Toast.LENGTH_SHORT).show()
+                                }
                             },
                             onSave = { save(entry) },
                             onDelete = { pendingDelete = entry },

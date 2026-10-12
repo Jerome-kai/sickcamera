@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * One attempt at one job: the camera's _generation_worker_loop body.
@@ -119,7 +120,8 @@ class GenerationWorker(appContext: Context, params: WorkerParameters) : Coroutin
                     promptBody = job.promptBody,
                     model = job.model,
                     api = job.api.wire,
-                    createdAt = LocalDateTime.now().withNano(0).toString(),
+                    // toString() drops the seconds whenever they are zero; the camera always wrote them.
+                    createdAt = LocalDateTime.now().withNano(0).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
                     magicReferencePath = job.referencePaths.firstOrNull().takeIf { job.magicHistoryId != null },
                     magicHistoryId = job.magicHistoryId,
                     variant = job.variant,
